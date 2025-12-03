@@ -23,10 +23,10 @@ import (
 	"github.com/coreos/etcd-operator/pkg/util/constants"
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	"k8s.io/api/core/v1"
+	rpctypes "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ErrLostQuorum indicates that the etcd cluster lost its quorum.
@@ -141,7 +141,7 @@ func (c *Cluster) addOneMember() error {
 		return fmt.Errorf("fail to create member's pod (%s): %v", newMember.Name, err)
 	}
 	c.logger.Infof("added member (%s)", newMember.Name)
-	_, err = c.eventsCli.Create(k8sutil.NewMemberAddEvent(newMember.Name, c.cluster))
+	_, err = c.eventsCli.Create(context.TODO(), k8sutil.NewMemberAddEvent(newMember.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Errorf("failed to create new member add event: %v", err)
 	}
@@ -156,7 +156,7 @@ func (c *Cluster) removeOneMember() error {
 
 func (c *Cluster) removeDeadMember(toRemove *etcdutil.Member) error {
 	c.logger.Infof("removing dead member %q", toRemove.Name)
-	_, err := c.eventsCli.Create(k8sutil.ReplacingDeadMemberEvent(toRemove.Name, c.cluster))
+	_, err := c.eventsCli.Create(context.TODO(), k8sutil.ReplacingDeadMemberEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Errorf("failed to create replacing dead member event: %v", err)
 	}
@@ -181,7 +181,7 @@ func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
 		}
 	}
 	c.members.Remove(toRemove.Name)
-	_, err = c.eventsCli.Create(k8sutil.MemberRemoveEvent(toRemove.Name, c.cluster))
+	_, err = c.eventsCli.Create(context.TODO(), k8sutil.MemberRemoveEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Errorf("failed to create remove member event: %v", err)
 	}
@@ -199,7 +199,7 @@ func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
 }
 
 func (c *Cluster) removePVC(pvcName string) error {
-	err := c.config.KubeCli.Core().PersistentVolumeClaims(c.cluster.Namespace).Delete(pvcName, nil)
+	err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Delete(context.TODO(), pvcName, metav1.DeleteOptions{})
 	if err != nil && !k8sutil.IsKubernetesResourceNotFoundError(err) {
 		return fmt.Errorf("remove pvc (%s) failed: %v", pvcName, err)
 	}

@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The etcd-operator Authors
+Copyright 2025 The etcd-operator Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,12 +19,13 @@ limitations under the License.
 package v1beta2
 
 import (
+	context "context"
 	time "time"
 
-	etcdv1beta2 "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	apisetcdv1beta2 "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	versioned "github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
 	internalinterfaces "github.com/coreos/etcd-operator/pkg/generated/informers/externalversions/internalinterfaces"
-	v1beta2 "github.com/coreos/etcd-operator/pkg/generated/listers/etcd/v1beta2"
+	etcdv1beta2 "github.com/coreos/etcd-operator/pkg/generated/listers/etcd/v1beta2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +36,7 @@ import (
 // EtcdClusters.
 type EtcdClusterInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta2.EtcdClusterLister
+	Lister() etcdv1beta2.EtcdClusterLister
 }
 
 type etcdClusterInformer struct {
@@ -61,16 +62,28 @@ func NewFilteredEtcdClusterInformer(client versioned.Interface, namespace string
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.EtcdV1beta2().EtcdClusters(namespace).List(options)
+				return client.EtcdV1beta2().EtcdClusters(namespace).List(context.Background(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.EtcdV1beta2().EtcdClusters(namespace).Watch(options)
+				return client.EtcdV1beta2().EtcdClusters(namespace).Watch(context.Background(), options)
+			},
+			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.EtcdV1beta2().EtcdClusters(namespace).List(ctx, options)
+			},
+			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.EtcdV1beta2().EtcdClusters(namespace).Watch(ctx, options)
 			},
 		},
-		&etcdv1beta2.EtcdCluster{},
+		&apisetcdv1beta2.EtcdCluster{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +94,9 @@ func (f *etcdClusterInformer) defaultInformer(client versioned.Interface, resync
 }
 
 func (f *etcdClusterInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&etcdv1beta2.EtcdCluster{}, f.defaultInformer)
+	return f.factory.InformerFor(&apisetcdv1beta2.EtcdCluster{}, f.defaultInformer)
 }
 
-func (f *etcdClusterInformer) Lister() v1beta2.EtcdClusterLister {
-	return v1beta2.NewEtcdClusterLister(f.Informer().GetIndexer())
+func (f *etcdClusterInformer) Lister() etcdv1beta2.EtcdClusterLister {
+	return etcdv1beta2.NewEtcdClusterLister(f.Informer().GetIndexer())
 }

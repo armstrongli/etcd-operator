@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/coreos/etcd-operator/test/e2e/e2eutil"
@@ -35,7 +35,7 @@ func TestCreateClusterWithPV(t *testing.T) {
 	c.Spec.Pod = &api.PodPolicy{
 		PersistentVolumeClaimSpec: &v1.PersistentVolumeClaimSpec{
 			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-			Resources: v1.ResourceRequirements{
+			Resources: v1.VolumeResourceRequirements{
 				Requests: v1.ResourceList{v1.ResourceName(v1.ResourceStorage): resource.MustParse("512Mi")},
 			},
 			StorageClassName: func(s string) *string { return &s }("standard"),

@@ -15,6 +15,7 @@
 package framework
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/coreos/etcd-operator/pkg/client"
@@ -25,7 +26,7 @@ import (
 	"github.com/coreos/etcd-operator/test/e2e/e2eutil"
 
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -104,7 +105,7 @@ func (f *Framework) CreateOperator(name string) error {
 							},
 						},
 						ReadinessProbe: &v1.Probe{
-							Handler: v1.Handler{
+							ProbeHandler: v1.ProbeHandler{
 								HTTPGet: &v1.HTTPGetAction{
 									Path: probe.HTTPReadyzEndpoint,
 									Port: intstr.IntOrString{Type: intstr.Int, IntVal: 8080},
@@ -119,7 +120,7 @@ func (f *Framework) CreateOperator(name string) error {
 			},
 		},
 	}
-	_, err := f.KubeCli.AppsV1beta1().Deployments(f.KubeNS).Create(d)
+	_, err := f.KubeCli.AppsV1beta1().Deployments(f.KubeNS).Create(context.TODO(), d, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %v", err)
 	}
@@ -127,7 +128,7 @@ func (f *Framework) CreateOperator(name string) error {
 }
 
 func (f *Framework) DeleteOperator(name string) error {
-	err := f.KubeCli.AppsV1beta1().Deployments(f.KubeNS).Delete(name, k8sutil.CascadeDeleteOptions(0))
+	err := f.KubeCli.AppsV1beta1().Deployments(f.KubeNS).Delete(context.TODO(), name, *k8sutil.CascadeDeleteOptions(0))
 	if err != nil {
 		return err
 	}
@@ -144,7 +145,7 @@ func (f *Framework) DeleteOperator(name string) error {
 	// The deleted operator will not actively release the Endpoints lock causing a non-leader candidate to timeout for the lease duration: 15s
 	// Deleting the Endpoints resource simulates the leader actively releasing the lock so that the next candidate avoids the timeout.
 	// TODO: change this if we change to use another kind of lock, e.g. configmap.
-	return f.KubeCli.CoreV1().Endpoints(f.KubeNS).Delete("etcd-operator", metav1.NewDeleteOptions(0))
+	return f.KubeCli.CoreV1().Endpoints(f.KubeNS).Delete(context.TODO(), "etcd-operator", *metav1.NewDeleteOptions(0))
 }
 
 func (f *Framework) UpgradeOperator(name string) error {

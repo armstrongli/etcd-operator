@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The etcd-operator Authors
+Copyright 2025 The etcd-operator Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,15 +29,15 @@ type FakeEtcdV1beta2 struct {
 }
 
 func (c *FakeEtcdV1beta2) EtcdBackups(namespace string) v1beta2.EtcdBackupInterface {
-	return &FakeEtcdBackups{c, namespace}
+	return newFakeEtcdBackups(c, namespace)
 }
 
 func (c *FakeEtcdV1beta2) EtcdClusters(namespace string) v1beta2.EtcdClusterInterface {
-	return &FakeEtcdClusters{c, namespace}
+	return newFakeEtcdClusters(c, namespace)
 }
 
 func (c *FakeEtcdV1beta2) EtcdRestores(namespace string) v1beta2.EtcdRestoreInterface {
-	return &FakeEtcdRestores{c, namespace}
+	return newFakeEtcdRestores(c, namespace)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

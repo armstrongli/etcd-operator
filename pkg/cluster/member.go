@@ -19,10 +19,9 @@ import (
 
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-	"github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/pkg/errors"
-
-	"k8s.io/api/core/v1"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	v1 "k8s.io/api/core/v1"
 )
 
 func (c *Cluster) updateMembers(known etcdutil.MemberSet) error {

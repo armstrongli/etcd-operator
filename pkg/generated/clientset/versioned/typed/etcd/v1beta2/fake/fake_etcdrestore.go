@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The etcd-operator Authors
+Copyright 2025 The etcd-operator Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,121 +20,32 @@ package fake
 
 import (
 	v1beta2 "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
-	types "k8s.io/apimachinery/pkg/types"
-	watch "k8s.io/apimachinery/pkg/watch"
-	testing "k8s.io/client-go/testing"
+	etcdv1beta2 "github.com/coreos/etcd-operator/pkg/generated/applyconfiguration/etcd/v1beta2"
+	typedetcdv1beta2 "github.com/coreos/etcd-operator/pkg/generated/clientset/versioned/typed/etcd/v1beta2"
+	gentype "k8s.io/client-go/gentype"
 )
 
-// FakeEtcdRestores implements EtcdRestoreInterface
-type FakeEtcdRestores struct {
+// fakeEtcdRestores implements EtcdRestoreInterface
+type fakeEtcdRestores struct {
+	*gentype.FakeClientWithListAndApply[*v1beta2.EtcdRestore, *v1beta2.EtcdRestoreList, *etcdv1beta2.EtcdRestoreApplyConfiguration]
 	Fake *FakeEtcdV1beta2
-	ns   string
 }
 
-var etcdrestoresResource = schema.GroupVersionResource{Group: "etcd.database.coreos.com", Version: "v1beta2", Resource: "etcdrestores"}
-
-var etcdrestoresKind = schema.GroupVersionKind{Group: "etcd.database.coreos.com", Version: "v1beta2", Kind: "EtcdRestore"}
-
-// Get takes name of the etcdRestore, and returns the corresponding etcdRestore object, and an error if there is any.
-func (c *FakeEtcdRestores) Get(name string, options v1.GetOptions) (result *v1beta2.EtcdRestore, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(etcdrestoresResource, c.ns, name), &v1beta2.EtcdRestore{})
-
-	if obj == nil {
-		return nil, err
+func newFakeEtcdRestores(fake *FakeEtcdV1beta2, namespace string) typedetcdv1beta2.EtcdRestoreInterface {
+	return &fakeEtcdRestores{
+		gentype.NewFakeClientWithListAndApply[*v1beta2.EtcdRestore, *v1beta2.EtcdRestoreList, *etcdv1beta2.EtcdRestoreApplyConfiguration](
+			fake.Fake,
+			namespace,
+			v1beta2.SchemeGroupVersion.WithResource("etcdrestores"),
+			v1beta2.SchemeGroupVersion.WithKind("EtcdRestore"),
+			func() *v1beta2.EtcdRestore { return &v1beta2.EtcdRestore{} },
+			func() *v1beta2.EtcdRestoreList { return &v1beta2.EtcdRestoreList{} },
+			func(dst, src *v1beta2.EtcdRestoreList) { dst.ListMeta = src.ListMeta },
+			func(list *v1beta2.EtcdRestoreList) []*v1beta2.EtcdRestore { return gentype.ToPointerSlice(list.Items) },
+			func(list *v1beta2.EtcdRestoreList, items []*v1beta2.EtcdRestore) {
+				list.Items = gentype.FromPointerSlice(items)
+			},
+		),
+		fake,
 	}
-	return obj.(*v1beta2.EtcdRestore), err
-}
-
-// List takes label and field selectors, and returns the list of EtcdRestores that match those selectors.
-func (c *FakeEtcdRestores) List(opts v1.ListOptions) (result *v1beta2.EtcdRestoreList, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewListAction(etcdrestoresResource, etcdrestoresKind, c.ns, opts), &v1beta2.EtcdRestoreList{})
-
-	if obj == nil {
-		return nil, err
-	}
-
-	label, _, _ := testing.ExtractFromListOptions(opts)
-	if label == nil {
-		label = labels.Everything()
-	}
-	list := &v1beta2.EtcdRestoreList{ListMeta: obj.(*v1beta2.EtcdRestoreList).ListMeta}
-	for _, item := range obj.(*v1beta2.EtcdRestoreList).Items {
-		if label.Matches(labels.Set(item.Labels)) {
-			list.Items = append(list.Items, item)
-		}
-	}
-	return list, err
-}
-
-// Watch returns a watch.Interface that watches the requested etcdRestores.
-func (c *FakeEtcdRestores) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(etcdrestoresResource, c.ns, opts))
-
-}
-
-// Create takes the representation of a etcdRestore and creates it.  Returns the server's representation of the etcdRestore, and an error, if there is any.
-func (c *FakeEtcdRestores) Create(etcdRestore *v1beta2.EtcdRestore) (result *v1beta2.EtcdRestore, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(etcdrestoresResource, c.ns, etcdRestore), &v1beta2.EtcdRestore{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*v1beta2.EtcdRestore), err
-}
-
-// Update takes the representation of a etcdRestore and updates it. Returns the server's representation of the etcdRestore, and an error, if there is any.
-func (c *FakeEtcdRestores) Update(etcdRestore *v1beta2.EtcdRestore) (result *v1beta2.EtcdRestore, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(etcdrestoresResource, c.ns, etcdRestore), &v1beta2.EtcdRestore{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*v1beta2.EtcdRestore), err
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeEtcdRestores) UpdateStatus(etcdRestore *v1beta2.EtcdRestore) (*v1beta2.EtcdRestore, error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(etcdrestoresResource, "status", c.ns, etcdRestore), &v1beta2.EtcdRestore{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*v1beta2.EtcdRestore), err
-}
-
-// Delete takes name of the etcdRestore and deletes it. Returns an error if one occurs.
-func (c *FakeEtcdRestores) Delete(name string, options *v1.DeleteOptions) error {
-	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(etcdrestoresResource, c.ns, name), &v1beta2.EtcdRestore{})
-
-	return err
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *FakeEtcdRestores) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(etcdrestoresResource, c.ns, listOptions)
-
-	_, err := c.Fake.Invokes(action, &v1beta2.EtcdRestoreList{})
-	return err
-}
-
-// Patch applies the patch and returns the patched etcdRestore.
-func (c *FakeEtcdRestores) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta2.EtcdRestore, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(etcdrestoresResource, c.ns, name, data, subresources...), &v1beta2.EtcdRestore{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*v1beta2.EtcdRestore), err
 }

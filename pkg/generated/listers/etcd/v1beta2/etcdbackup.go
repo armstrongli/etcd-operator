@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The etcd-operator Authors
+Copyright 2025 The etcd-operator Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,16 +19,18 @@ limitations under the License.
 package v1beta2
 
 import (
-	v1beta2 "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/tools/cache"
+	etcdv1beta2 "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // EtcdBackupLister helps list EtcdBackups.
+// All objects returned here must be treated as read-only.
 type EtcdBackupLister interface {
 	// List lists all EtcdBackups in the indexer.
-	List(selector labels.Selector) (ret []*v1beta2.EtcdBackup, err error)
+	// Objects returned here must be treated as read-only.
+	List(selector labels.Selector) (ret []*etcdv1beta2.EtcdBackup, err error)
 	// EtcdBackups returns an object that can list and get EtcdBackups.
 	EtcdBackups(namespace string) EtcdBackupNamespaceLister
 	EtcdBackupListerExpansion
@@ -36,59 +38,33 @@ type EtcdBackupLister interface {
 
 // etcdBackupLister implements the EtcdBackupLister interface.
 type etcdBackupLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*etcdv1beta2.EtcdBackup]
 }
 
 // NewEtcdBackupLister returns a new EtcdBackupLister.
 func NewEtcdBackupLister(indexer cache.Indexer) EtcdBackupLister {
-	return &etcdBackupLister{indexer: indexer}
-}
-
-// List lists all EtcdBackups in the indexer.
-func (s *etcdBackupLister) List(selector labels.Selector) (ret []*v1beta2.EtcdBackup, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta2.EtcdBackup))
-	})
-	return ret, err
+	return &etcdBackupLister{listers.New[*etcdv1beta2.EtcdBackup](indexer, etcdv1beta2.Resource("etcdbackup"))}
 }
 
 // EtcdBackups returns an object that can list and get EtcdBackups.
 func (s *etcdBackupLister) EtcdBackups(namespace string) EtcdBackupNamespaceLister {
-	return etcdBackupNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return etcdBackupNamespaceLister{listers.NewNamespaced[*etcdv1beta2.EtcdBackup](s.ResourceIndexer, namespace)}
 }
 
 // EtcdBackupNamespaceLister helps list and get EtcdBackups.
+// All objects returned here must be treated as read-only.
 type EtcdBackupNamespaceLister interface {
 	// List lists all EtcdBackups in the indexer for a given namespace.
-	List(selector labels.Selector) (ret []*v1beta2.EtcdBackup, err error)
+	// Objects returned here must be treated as read-only.
+	List(selector labels.Selector) (ret []*etcdv1beta2.EtcdBackup, err error)
 	// Get retrieves the EtcdBackup from the indexer for a given namespace and name.
-	Get(name string) (*v1beta2.EtcdBackup, error)
+	// Objects returned here must be treated as read-only.
+	Get(name string) (*etcdv1beta2.EtcdBackup, error)
 	EtcdBackupNamespaceListerExpansion
 }
 
 // etcdBackupNamespaceLister implements the EtcdBackupNamespaceLister
 // interface.
 type etcdBackupNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all EtcdBackups in the indexer for a given namespace.
-func (s etcdBackupNamespaceLister) List(selector labels.Selector) (ret []*v1beta2.EtcdBackup, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta2.EtcdBackup))
-	})
-	return ret, err
-}
-
-// Get retrieves the EtcdBackup from the indexer for a given namespace and name.
-func (s etcdBackupNamespaceLister) Get(name string) (*v1beta2.EtcdBackup, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta2.Resource("etcdbackup"), name)
-	}
-	return obj.(*v1beta2.EtcdBackup), nil
+	listers.ResourceIndexer[*etcdv1beta2.EtcdBackup]
 }

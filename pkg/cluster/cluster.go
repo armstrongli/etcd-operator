@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,7 @@ import (
 
 	"github.com/pborman/uuid"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -87,7 +88,7 @@ type Cluster struct {
 
 func New(config Config, cl *api.EtcdCluster) *Cluster {
 	lg := logrus.WithField("pkg", "cluster").WithField("cluster-name", cl.Name).WithField("cluster-namespace", cl.Namespace)
-	if len(cl.Name) > k8sutil.MaxNameLength || len(cl.ClusterName) > k8sutil.MaxNameLength {
+	if len(cl.Name) > k8sutil.MaxNameLength || len(cl.ObjectMeta.Name) > k8sutil.MaxNameLength {
 		return nil
 	}
 
@@ -98,7 +99,7 @@ func New(config Config, cl *api.EtcdCluster) *Cluster {
 		eventCh:   make(chan *clusterEvent, 100),
 		stopCh:    make(chan struct{}),
 		status:    *(cl.Status.DeepCopy()),
-		eventsCli: config.KubeCli.Core().Events(cl.Namespace),
+		eventsCli: config.KubeCli.CoreV1().Events(cl.Namespace),
 	}
 
 	go func() {
@@ -325,7 +326,7 @@ func (c *Cluster) startSeedMember() error {
 	}
 	c.members = ms
 	c.logger.Infof("cluster created with seed member (%s)", m.Name)
-	_, err := c.eventsCli.Create(k8sutil.NewMemberAddEvent(m.Name, c.cluster))
+	_, err := c.eventsCli.Create(context.TODO(), k8sutil.NewMemberAddEvent(m.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Errorf("failed to create new member add event: %v", err)
 	}
@@ -373,7 +374,7 @@ func (c *Cluster) createPod(members etcdutil.MemberSet, m *etcdutil.Member, stat
 	pod := k8sutil.NewEtcdPod(m, members.PeerURLPairs(), c.cluster.Name, state, uuid.New(), c.cluster.Spec, c.cluster.AsOwner())
 	if c.isPodPVEnabled() {
 		pvc := k8sutil.NewEtcdPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
-		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(pvc)
+		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(context.TODO(), pvc, metav1.CreateOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to create PVC for member (%s): %v", m.Name, err)
 		}
@@ -381,14 +382,14 @@ func (c *Cluster) createPod(members etcdutil.MemberSet, m *etcdutil.Member, stat
 	} else {
 		k8sutil.AddEtcdVolumeToPod(pod, nil)
 	}
-	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(pod)
+	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	return err
 }
 
 func (c *Cluster) removePod(name string) error {
 	ns := c.cluster.Namespace
 	opts := metav1.NewDeleteOptions(podTerminationGracePeriod)
-	err := c.config.KubeCli.Core().Pods(ns).Delete(name, opts)
+	err := c.config.KubeCli.CoreV1().Pods(ns).Delete(context.TODO(), name, *opts)
 	if err != nil {
 		if !k8sutil.IsKubernetesResourceNotFoundError(err) {
 			return err
@@ -398,7 +399,7 @@ func (c *Cluster) removePod(name string) error {
 }
 
 func (c *Cluster) pollPods() (running, pending []*v1.Pod, err error) {
-	podList, err := c.config.KubeCli.Core().Pods(c.cluster.Namespace).List(k8sutil.ClusterListOpt(c.cluster.Name))
+	podList, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).List(context.TODO(), k8sutil.ClusterListOpt(c.cluster.Name))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list running pods: %v", err)
 	}
@@ -452,7 +453,7 @@ func (c *Cluster) updateCRStatus() error {
 
 	newCluster := c.cluster
 	newCluster.Status = c.status
-	newCluster, err := c.config.EtcdCRCli.EtcdV1beta2().EtcdClusters(c.cluster.Namespace).Update(c.cluster)
+	newCluster, err := c.config.EtcdCRCli.EtcdV1beta2().EtcdClusters(c.cluster.Namespace).Update(context.TODO(), c.cluster, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update CR status: %v", err)
 	}
@@ -479,7 +480,7 @@ func (c *Cluster) reportFailedStatus() {
 		}
 
 		cl, err := c.config.EtcdCRCli.EtcdV1beta2().EtcdClusters(c.cluster.Namespace).
-			Get(c.cluster.Name, metav1.GetOptions{})
+			Get(context.TODO(), c.cluster.Name, metav1.GetOptions{})
 		if err != nil {
 			// Update (PUT) will return conflict even if object is deleted since we have UID set in object.
 			// Because it will check UID first and return something like:

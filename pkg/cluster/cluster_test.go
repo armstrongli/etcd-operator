@@ -67,7 +67,6 @@ func TestNewLongClusterName(t *testing.T) {
 			Namespace: metav1.NamespaceDefault,
 		},
 	}
-	clus.SetClusterName("example-etcd-cluster123456789123456789123456789123456789123456")
 	if c := New(Config{}, clus); c != nil {
 		t.Errorf("expect c to be nil")
 	}

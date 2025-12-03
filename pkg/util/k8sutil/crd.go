@@ -15,6 +15,7 @@
 package k8sutil
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -35,7 +36,7 @@ import (
 type EtcdClusterCRUpdateFunc func(*api.EtcdCluster)
 
 func GetClusterList(restcli rest.Interface, ns string) (*api.EtcdClusterList, error) {
-	b, err := restcli.Get().RequestURI(listClustersURI(ns)).DoRaw()
+	b, err := restcli.Get().RequestURI(listClustersURI(ns)).DoRaw(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func CreateCRD(clientset apiextensionsclient.Interface, crdName, rkind, rplural,
 	if len(shortName) != 0 {
 		crd.Spec.Names.ShortNames = []string{shortName}
 	}
-	_, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Create(crd)
+	_, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Create(context.TODO(), crd, metav1.CreateOptions{})
 	if err != nil && !IsKubernetesResourceAlreadyExistError(err) {
 		return err
 	}
@@ -78,7 +79,7 @@ func CreateCRD(clientset apiextensionsclient.Interface, crdName, rkind, rplural,
 
 func WaitCRDReady(clientset apiextensionsclient.Interface, crdName string) error {
 	err := retryutil.Retry(5*time.Second, 20, func() (bool, error) {
-		crd, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(crdName, metav1.GetOptions{})
+		crd, err := clientset.ApiextensionsV1beta1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
