@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -e
+set -x
+
+if ! which docker >/dev/null; then
+	echo "docker needs to be installed"
+	exit 1
+fi
+
+export IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
+export IMAGE_REPO="${IMAGE_REPO:-}"
+export IMAGE_NAME="${IMAGE_NAME:-etcd-operator}"
+export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+: ${IMAGE_NAME:?"Need to set IMAGE_NAME, e.g. etcd-operator"}
+
+# Start with just name:tag
+IMAGE_FULL_TAG="${IMAGE_NAME}:${IMAGE_TAG}"
+
+# Add repo prefix if set
+if [ -n "${IMAGE_REPO}" ]; then
+    IMAGE_FULL_TAG="${IMAGE_REPO}/${IMAGE_FULL_TAG}"
+fi
+
+# Add registry prefix if set (comes first in the full path)
+if [ -n "${IMAGE_REGISTRY}" ]; then
+    IMAGE_FULL_TAG="${IMAGE_REGISTRY}/${IMAGE_FULL_TAG}"
+fi
+
+export IMAGE_FULL_TAG
+export IMAGE_FULL_TAG_SLIM="${IMAGE_FULL_TAG}-slim"
+
+echo "building ${IMAGE_FULL_TAG} ..."
+docker build --tag="${IMAGE_FULL_TAG}" --target=default -f hack/build/Dockerfile .
+echo "building ${IMAGE_FULL_TAG_SLIM} ..."
+docker build --tag="${IMAGE_FULL_TAG_SLIM}" --target=slim -f hack/build/Dockerfile .
