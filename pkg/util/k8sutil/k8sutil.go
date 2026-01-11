@@ -21,7 +21,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -233,16 +232,15 @@ func newEtcdServiceManifest(svcName, clusterName, clusterIP string, ports []v1.S
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   svcName,
 			Labels: labels,
-			Annotations: map[string]string{
-				TolerateUnreadyEndpointsAnnotation: strconv.FormatBool(publishNotReadyAddresses),
-			},
 		},
 		Spec: v1.ServiceSpec{
 			Ports:     ports,
 			Selector:  labels,
 			ClusterIP: clusterIP,
-			// PublishNotReadyAddresses: publishNotReadyAddresses, // TODO(ckoehn): Activate once TolerateUnreadyEndpointsAnnotation is deprecated.
 		},
+	}
+	if publishNotReadyAddresses {
+		svc.Spec.PublishNotReadyAddresses = true
 	}
 	return svc
 }
