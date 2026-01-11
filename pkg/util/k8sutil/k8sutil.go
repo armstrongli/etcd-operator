@@ -74,8 +74,6 @@ const (
 	defaultDNSTimeout = int64(0)
 )
 
-const TolerateUnreadyEndpointsAnnotation = "service.alpha.kubernetes.io/tolerate-unready-endpoints"
-
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
 }
