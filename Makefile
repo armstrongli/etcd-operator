@@ -1,4 +1,4 @@
 
 build:
-	./hack/build/docker_push
+	./hack/build/docker_build
 .PHONY: build
