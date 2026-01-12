@@ -1,0 +1,72 @@
+# Basic etcd pod without TLS
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-etcd-0
+  labels:
+    app: etcd
+    etcd_node: test-etcd-0
+    etcd_cluster: test-etcd
+  annotations:
+    etcd.version: "3.3.10"
+spec:
+  hostname: test-etcd-0
+  subdomain: test-etcd
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  initContainers:
+  - name: check-dns
+    image: busybox:1.28.0-glibc
+    command:
+    - /bin/sh
+    - -c
+    - |
+      TIMEOUT_READY=0
+      while ( ! nslookup test-etcd-0.test-etcd.default.svc )
+      do
+        # If TIMEOUT_READY is 0 we should never time out and exit 
+        TIMEOUT_READY=$(( TIMEOUT_READY-1 ))
+        if [ $TIMEOUT_READY -eq 0 ];
+        then
+          echo "Timed out waiting for DNS entry"
+          exit 1
+        fi
+        sleep 1
+      done
+  containers:
+  - name: etcd
+    image: quay.io/coreos/etcd:v3.3.10
+    command:
+    - /usr/local/bin/etcd
+    - --data-dir=/var/etcd/data
+    - --name=test-etcd-0
+    - --initial-advertise-peer-urls=http://test-etcd-0.test-etcd.default.svc:2380
+    - --listen-peer-urls=http://0.0.0.0:2380
+    - --listen-client-urls=http://0.0.0.0:2379
+    - --advertise-client-urls=http://test-etcd-0.test-etcd.default.svc:2379
+    - --initial-cluster=test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380
+    - --initial-cluster-state=new
+    - --initial-cluster-token=test-token
+    volumeMounts:
+    - mountPath: /var/etcd
+      name: etcd-data
+    livenessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -ec
+        - ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 10
+    readinessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -ec
+        - ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health
+      initialDelaySeconds: 1
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 3
+  volumes: []
