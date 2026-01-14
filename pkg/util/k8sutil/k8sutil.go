@@ -295,18 +295,40 @@ func NewEtcdPodPVC(m *etcdutil.Member, pvcSpec v1.PersistentVolumeClaimSpec, clu
 }
 
 func newEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state, token string, cs api.ClusterSpec) *v1.Pod {
-	commands := fmt.Sprintf("/usr/local/bin/etcd --data-dir=%s --name=%s --initial-advertise-peer-urls=%s "+
-		"--listen-peer-urls=%s --listen-client-urls=%s --advertise-client-urls=%s "+
-		"--initial-cluster=%s --initial-cluster-state=%s",
-		dataDir, m.Name, m.PeerURL(), m.ListenPeerURL(), m.ListenClientURL(), m.ClientURL(), strings.Join(initialCluster, ","), state)
+	commands := []string{
+		"/usr/local/bin/etcd",
+		fmt.Sprintf("--data-dir=%s", dataDir),
+		fmt.Sprintf("--name=%s", m.Name),
+		fmt.Sprintf("--initial-advertise-peer-urls=%s", m.PeerURL()),
+		fmt.Sprintf("--listen-peer-urls=%s", m.ListenPeerURL()),
+		fmt.Sprintf("--listen-client-urls=%s", m.ListenClientURL()),
+		fmt.Sprintf("--advertise-client-urls=%s", m.ClientURL()),
+		fmt.Sprintf("--initial-cluster=%s", strings.Join(initialCluster, ",")),
+		fmt.Sprintf("--initial-cluster-state=%s", state),
+	}
+
 	if m.SecurePeer {
-		commands += fmt.Sprintf(" --peer-client-cert-auth=true --peer-trusted-ca-file=%[1]s/peer-ca.crt --peer-cert-file=%[1]s/peer.crt --peer-key-file=%[1]s/peer.key", peerTLSDir)
+		peerTLSArgs := []string{
+			"--peer-client-cert-auth=true",
+			fmt.Sprintf("--peer-trusted-ca-file=%s/peer-ca.crt", peerTLSDir),
+			fmt.Sprintf("--peer-cert-file=%s/peer.crt", peerTLSDir),
+			fmt.Sprintf("--peer-key-file=%s/peer.key", peerTLSDir),
+		}
+		commands = append(commands, peerTLSArgs...)
 	}
+
 	if m.SecureClient {
-		commands += fmt.Sprintf(" --client-cert-auth=true --trusted-ca-file=%[1]s/server-ca.crt --cert-file=%[1]s/server.crt --key-file=%[1]s/server.key", serverTLSDir)
+		clientTLSArgs := []string{
+			"--client-cert-auth=true",
+			fmt.Sprintf("--trusted-ca-file=%s/server-ca.crt", serverTLSDir),
+			fmt.Sprintf("--cert-file=%s/server.crt", serverTLSDir),
+			fmt.Sprintf("--key-file=%s/server.key", serverTLSDir),
+		}
+		commands = append(commands, clientTLSArgs...)
 	}
+
 	if state == "new" {
-		commands = fmt.Sprintf("%s --initial-cluster-token=%s", commands, token)
+		commands = append(commands, fmt.Sprintf("--initial-cluster-token=%s", token))
 	}
 
 	labels := map[string]string{
@@ -323,7 +345,7 @@ func newEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state,
 	readinessProbe.FailureThreshold = 3
 
 	container := containerWithProbes(
-		etcdContainer(strings.Split(commands, " "), cs.Repository, cs.Version),
+		etcdContainer(commands, cs.Repository, cs.Version),
 		livenessProbe,
 		readinessProbe)
 

@@ -50,6 +50,13 @@ spec:
     - --peer-trusted-ca-file=/etc/etcdtls/member/peer-tls/peer-ca.crt
     - --peer-cert-file=/etc/etcdtls/member/peer-tls/peer.crt
     - --peer-key-file=/etc/etcdtls/member/peer-tls/peer.key
+    ports:
+    - name: server
+      containerPort: 2380
+      protocol: TCP
+    - name: client
+      containerPort: 2379
+      protocol: TCP
     volumeMounts:
     - mountPath: /var/etcd
       name: etcd-data
@@ -58,18 +65,19 @@ spec:
     livenessProbe:
       exec:
         command:
-        - /bin/sh
-        - -ec
-        - ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health
+        - etcdctl
+        - endpoint
+        - status
       initialDelaySeconds: 10
-      periodSeconds: 30
+      periodSeconds: 60
       timeoutSeconds: 10
+      failureThreshold: 3
     readinessProbe:
       exec:
         command:
-        - /bin/sh
-        - -ec
-        - ETCDCTL_API=3 etcdctl --endpoints=http://localhost:2379 endpoint health
+        - etcdctl
+        - endpoint
+        - status
       initialDelaySeconds: 1
       periodSeconds: 5
       timeoutSeconds: 5
