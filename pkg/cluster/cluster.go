@@ -371,7 +371,10 @@ func (c *Cluster) isPodPVEnabled() bool {
 }
 
 func (c *Cluster) createPod(members etcdutil.MemberSet, m *etcdutil.Member, state string) error {
-	pod := k8sutil.NewEtcdPod(m, members.PeerURLPairs(), c.cluster.Name, state, uuid.New(), c.cluster.Spec, c.cluster.AsOwner())
+	pod, err := k8sutil.NewEtcdPod(m, members.PeerURLPairs(), c.cluster.Name, state, uuid.New(), c.cluster.Spec, c.cluster.AsOwner())
+	if err != nil {
+		return err
+	}
 	if c.isPodPVEnabled() {
 		pvc := k8sutil.NewEtcdPodPVC(m, *c.cluster.Spec.Pod.PersistentVolumeClaimSpec, c.cluster.Name, c.cluster.Namespace, c.cluster.AsOwner())
 		_, err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Create(context.TODO(), pvc, metav1.CreateOptions{})
@@ -382,7 +385,7 @@ func (c *Cluster) createPod(members etcdutil.MemberSet, m *etcdutil.Member, stat
 	} else {
 		k8sutil.AddEtcdVolumeToPod(pod, nil)
 	}
-	_, err := c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+	_, err = c.config.KubeCli.CoreV1().Pods(c.cluster.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	return err
 }
 

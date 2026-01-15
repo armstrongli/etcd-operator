@@ -18,9 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,10 +30,10 @@ import (
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
 	"github.com/pborman/uuid"
-
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -73,6 +75,80 @@ const (
 	// to reverse DNS lookup its IP. The default behavior is to wait forever and has a value of 0.
 	defaultDNSTimeout = int64(0)
 )
+
+func buildPodMutators(cs api.ClusterSpec) PodMutator {
+	var defaultEtcdPodMutators etcdPodMutators
+	defaultEtcdPodMutators = append(defaultEtcdPodMutators, &maxProcsMutator{
+		cs: cs,
+	})
+	return defaultEtcdPodMutators
+}
+
+var _ PodMutator = etcdPodMutators{}
+
+type etcdPodMutators []PodMutator
+
+func (e etcdPodMutators) Mutate(pod *v1.Pod) error {
+	for _, item := range e {
+		if err := item.Mutate(pod); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type PodMutator interface {
+	Mutate(pod *v1.Pod) error
+}
+
+var _ PodMutator = &maxProcsMutator{}
+
+type maxProcsMutator struct {
+	cs api.ClusterSpec
+}
+
+// Mutate implements [PodMutator].
+func (m *maxProcsMutator) Mutate(pod *v1.Pod) error {
+	const envNameGOMAXPROCS = "GOMAXPROCS"
+	var cpuQuantity resource.Quantity
+	if m.cs.Pod == nil {
+		return nil
+	}
+	if m.cs.Pod.Resources.Requests != nil && m.cs.Pod.Resources.Requests.Cpu().MilliValue() > 0 {
+		cpuQuantity = m.cs.Pod.Resources.Requests.Cpu().DeepCopy()
+	}
+	if m.cs.Pod.Resources.Limits != nil && m.cs.Pod.Resources.Limits.Cpu().MilliValue() > 0 {
+		cpuQuantity = m.cs.Pod.Resources.Limits.Cpu().DeepCopy()
+	}
+
+	if cpuQuantity.MilliValue() <= 0 {
+		return nil
+	}
+
+	cpuNum := int(math.Ceil(float64(cpuQuantity.MilliValue()) / 1000))
+	for i, item := range pod.Spec.Containers {
+		if item.Name == etcdContainerName {
+			mutated := false
+			for j, envItem := range item.Env {
+				if envItem.Name == envNameGOMAXPROCS {
+					envItem.Value = strconv.Itoa(cpuNum)
+					item.Env[j] = *envItem.DeepCopy()
+					mutated = true
+					break
+				}
+			}
+			if !mutated {
+				item.Env = append(item.Env, v1.EnvVar{
+					Name:  envNameGOMAXPROCS,
+					Value: strconv.Itoa(cpuNum),
+				})
+			}
+			pod.Spec.Containers[i] = *item.DeepCopy()
+			break
+		}
+	}
+	return nil
+}
 
 func GetEtcdVersion(pod *v1.Pod) string {
 	return pod.Annotations[etcdVersionAnnotationKey]
@@ -267,9 +343,12 @@ func addOwnerRefToObject(o metav1.Object, r metav1.OwnerReference) {
 
 // NewSeedMemberPod returns a Pod manifest for a seed member.
 // It's special that it has new token, and might need recovery init containers
-func NewSeedMemberPod(clusterName string, ms etcdutil.MemberSet, m *etcdutil.Member, cs api.ClusterSpec, owner metav1.OwnerReference, backupURL *url.URL) *v1.Pod {
+func NewSeedMemberPod(clusterName string, ms etcdutil.MemberSet, m *etcdutil.Member, cs api.ClusterSpec, owner metav1.OwnerReference, backupURL *url.URL) (*v1.Pod, error) {
 	token := uuid.New()
-	pod := newEtcdPod(m, ms.PeerURLPairs(), clusterName, "new", token, cs)
+	pod, err := newEtcdPod(m, ms.PeerURLPairs(), clusterName, "new", token, cs)
+	if err != nil {
+		return nil, err
+	}
 	// TODO: PVC datadir support for restore process
 	AddEtcdVolumeToPod(pod, nil)
 	if backupURL != nil {
@@ -277,7 +356,7 @@ func NewSeedMemberPod(clusterName string, ms etcdutil.MemberSet, m *etcdutil.Mem
 	}
 	applyPodPolicy(clusterName, pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
-	return pod
+	return pod, nil
 }
 
 // NewEtcdPodPVC create PVC object from etcd pod's PVC spec
@@ -294,7 +373,7 @@ func NewEtcdPodPVC(m *etcdutil.Member, pvcSpec v1.PersistentVolumeClaimSpec, clu
 	return pvc
 }
 
-func newEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state, token string, cs api.ClusterSpec) *v1.Pod {
+func newEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state, token string, cs api.ClusterSpec) (*v1.Pod, error) {
 	commands := []string{
 		"/usr/local/bin/etcd",
 		fmt.Sprintf("--data-dir=%s", dataDir),
@@ -420,7 +499,12 @@ done`, DNSTimeout, m.Addr())},
 		},
 	}
 	SetEtcdVersion(pod, cs.Version)
-	return pod
+
+	podMutator := buildPodMutators(cs)
+	if err := podMutator.Mutate(pod); err != nil {
+		return nil, err
+	}
+	return pod, nil
 }
 
 func podSecurityContext(podPolicy *api.PodPolicy) *v1.PodSecurityContext {
@@ -430,11 +514,14 @@ func podSecurityContext(podPolicy *api.PodPolicy) *v1.PodSecurityContext {
 	return podPolicy.SecurityContext
 }
 
-func NewEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state, token string, cs api.ClusterSpec, owner metav1.OwnerReference) *v1.Pod {
-	pod := newEtcdPod(m, initialCluster, clusterName, state, token, cs)
+func NewEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state, token string, cs api.ClusterSpec, owner metav1.OwnerReference) (*v1.Pod, error) {
+	pod, err := newEtcdPod(m, initialCluster, clusterName, state, token, cs)
+	if err != nil {
+		return nil, err
+	}
 	applyPodPolicy(clusterName, pod, cs.Pod)
 	addOwnerRefToObject(pod.GetObjectMeta(), owner)
-	return pod
+	return pod, nil
 }
 
 func MustNewKubeClient() kubernetes.Interface {

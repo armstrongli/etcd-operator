@@ -226,8 +226,11 @@ func (r *Restore) createSeedMember(ec *api.EtcdCluster, svcAddr, clusterName str
 	ms := etcdutil.NewMemberSet(m)
 	backupURL := backupapi.BackupURLForRestore("http", svcAddr, clusterName)
 	ec.SetDefaults()
-	pod := k8sutil.NewSeedMemberPod(clusterName, ms, m, ec.Spec, owner, backupURL)
-	_, err := r.kubecli.CoreV1().Pods(r.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+	pod, err := k8sutil.NewSeedMemberPod(clusterName, ms, m, ec.Spec, owner, backupURL)
+	if err != nil {
+		return err
+	}
+	_, err = r.kubecli.CoreV1().Pods(r.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	return err
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	yaml "sigs.k8s.io/yaml"
 )
 
@@ -145,8 +146,11 @@ func TestNewEtcdPod_Basic(t *testing.T) {
 
 	// Use the TestMember as a regular *etcdutil.Member
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "new", "test-token", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -184,8 +188,11 @@ func TestNewEtcdPod_PeerTLS(t *testing.T) {
 	}
 
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=https://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=https://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "existing", "", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -224,8 +231,11 @@ func TestNewEtcdPod_ClientTLS(t *testing.T) {
 	}
 
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "new", "test-token", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -267,8 +277,11 @@ func TestNewEtcdPod_BothTLS(t *testing.T) {
 	}
 
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=https://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=https://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "new", "test-token", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -301,8 +314,11 @@ func TestNewEtcdPod_CustomBusybox(t *testing.T) {
 	}
 
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "new", "test-token", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -338,8 +354,11 @@ func TestNewEtcdPod_SecurityContext(t *testing.T) {
 	}
 
 	var m *etcdutil.Member = &member.Member
-	pod := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
+	pod, err := newEtcdPod(m, []string{"test-etcd-0=http://test-etcd-0.test-etcd.default.svc:2380"},
 		"test-etcd", "existing", "", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !apiequality.Semantic.DeepEqual(expected, pod) {
 		expectedStr, _ := yaml.Marshal(expected.Spec.Containers)
@@ -347,5 +366,458 @@ func TestNewEtcdPod_SecurityContext(t *testing.T) {
 		if diff := cmp.Diff(expectedStr, actualStr); diff != "" {
 			t.Errorf("Summary diff:\n%s", diff)
 		}
+	}
+}
+
+func TestMaxProcsMutator_NoResources(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env: []v1.EnvVar{
+						{Name: "OTHER_ENV", Value: "value"},
+					},
+				},
+			},
+		},
+	}
+
+	// Should not mutate when no CPU resources defined
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate should not return error for no resources: %v", err)
+	}
+
+	// Verify no GOMAXPROCS was added
+	container := pod.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" {
+			t.Error("GOMAXPROCS should not be added when no CPU resources defined")
+		}
+	}
+}
+
+func TestMaxProcsMutator_OnlyRequestsIntCPU(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env:  []v1.EnvVar{},
+				},
+			},
+		},
+	}
+
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate failed: %v", err)
+	}
+
+	// Verify GOMAXPROCS was added with value 2
+	container := pod.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" && env.Value == "2" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("GOMAXPROCS=2 should be added when CPU request is 2")
+	}
+}
+
+func TestMaxProcsMutator_OnlyLimitsIntCPU(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("4"),
+					},
+				},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env: []v1.EnvVar{
+						{Name: "EXISTING_ENV", Value: "value"},
+					},
+				},
+			},
+		},
+	}
+
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate failed: %v", err)
+	}
+
+	// Verify GOMAXPROCS was added with value 4
+	container := pod.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" && env.Value == "4" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("GOMAXPROCS=4 should be added when CPU limit is 4")
+	}
+}
+
+func TestMaxProcsMutator_RequestsAndLimitsIntCPU_PrefersLimits(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("2"),
+					},
+					Limits: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("8"),
+					},
+				},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env:  []v1.EnvVar{},
+				},
+			},
+		},
+	}
+
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate failed: %v", err)
+	}
+
+	// Verify GOMAXPROCS uses limits (8) not requests (2)
+	container := pod.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" {
+			if env.Value == "8" {
+				found = true
+			} else {
+				t.Errorf("GOMAXPROCS should be 8 (from limits), got %s", env.Value)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("GOMAXPROCS should be added when CPU resources defined")
+	}
+}
+
+func TestMaxProcsMutator_RequestsFloatCPU(t *testing.T) {
+	testCases := []struct {
+		name        string
+		cpuString   string
+		expected    string
+		description string
+	}{
+		{
+			name:        "500m CPU",
+			cpuString:   "500m",
+			expected:    "1", // 500m ceils to 1
+			description: "500 milliCPU should ceil to 1",
+		},
+		{
+			name:        "1500m CPU",
+			cpuString:   "1500m",
+			expected:    "2", // 1500m ceils to 2
+			description: "1.5 CPU should ceil to 2",
+		},
+		{
+			name:        "800m CPU",
+			cpuString:   "800m",
+			expected:    "1", // 800m ceils to 1
+			description: "800 milliCPU should ceil to 1",
+		},
+		{
+			name:        "2300m CPU",
+			cpuString:   "2300m",
+			expected:    "3", // 2300m ceils to 3
+			description: "3 CPU should ceil to 2",
+		},
+		{
+			name:        "0.5 CPU",
+			cpuString:   "0.5",
+			expected:    "1", // 0.5 ceils to 1
+			description: "0.5 CPU should ceil to 1",
+		},
+		{
+			name:        "1.2 CPU",
+			cpuString:   "1.2",
+			expected:    "2", // 1.2 ceils to 2
+			description: "1.2 CPU should ceil to 2",
+		},
+		{
+			name:        "1.7 CPU",
+			cpuString:   "1.7",
+			expected:    "2", // 1.7 ceils to 2
+			description: "1.7 CPU should ceil to 2",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutator := &maxProcsMutator{
+				cs: api.ClusterSpec{
+					Pod: &api.PodPolicy{
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								v1.ResourceCPU: resource.MustParse(tc.cpuString),
+							},
+						},
+					},
+				},
+			}
+
+			pod := &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name: etcdContainerName,
+							Env:  []v1.EnvVar{},
+						},
+					},
+				},
+			}
+
+			err := mutator.Mutate(pod)
+			if err != nil {
+				t.Fatalf("Mutate failed for %s: %v", tc.description, err)
+			}
+
+			container := pod.Spec.Containers[0]
+			found := false
+			for _, env := range container.Env {
+				if env.Name == "GOMAXPROCS" {
+					if env.Value != tc.expected {
+						t.Errorf("%s: expected GOMAXPROCS=%s, got %s", tc.description, tc.expected, env.Value)
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s: GOMAXPROCS should be added", tc.description)
+			}
+		})
+	}
+}
+
+func TestMaxProcsMutator_RequestsAndLimitsFloatCPU_PrefersLimits(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("1.2"),
+					},
+					Limits: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("3.7"),
+					},
+				},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env:  []v1.EnvVar{},
+				},
+			},
+		},
+	}
+
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate failed: %v", err)
+	}
+
+	// Should use limits (3.7 -> ceils to 4) not requests (1.2 -> ceils to 1)
+	container := pod.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" && env.Value == "4" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("GOMAXPROCS=4 should be added (3.7 CPU limit ceils to 4)")
+	}
+}
+
+func TestMaxProcsMutator_UpdatesExistingGOMAXPROCS(t *testing.T) {
+	mutator := &maxProcsMutator{
+		cs: api.ClusterSpec{
+			Pod: &api.PodPolicy{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("4"),
+					},
+				},
+			},
+		},
+	}
+
+	pod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: etcdContainerName,
+					Env: []v1.EnvVar{
+						{Name: "GOMAXPROCS", Value: "1"}, // Existing value
+						{Name: "OTHER_ENV", Value: "test"},
+					},
+				},
+			},
+		},
+	}
+
+	err := mutator.Mutate(pod)
+	if err != nil {
+		t.Fatalf("Mutate failed: %v", err)
+	}
+
+	// Verify GOMAXPROCS was updated from 1 to 4
+	container := pod.Spec.Containers[0]
+	gomaxprocsFound := false
+	otherEnvFound := false
+	for _, env := range container.Env {
+		if env.Name == "GOMAXPROCS" {
+			if env.Value != "4" {
+				t.Errorf("GOMAXPROCS should be updated to 4, got %s", env.Value)
+			}
+			gomaxprocsFound = true
+		}
+		if env.Name == "OTHER_ENV" && env.Value == "test" {
+			otherEnvFound = true
+		}
+	}
+	if !gomaxprocsFound {
+		t.Error("GOMAXPROCS should exist after mutation")
+	}
+	if !otherEnvFound {
+		t.Error("OTHER_ENV should remain unchanged")
+	}
+}
+
+func TestMaxProcsMutator_ZeroCPU(t *testing.T) {
+	testCases := []struct {
+		name     string
+		requests string
+		limits   string
+	}{
+		{
+			name:     "zero requests",
+			requests: "0",
+			limits:   "",
+		},
+		{
+			name:     "zero limits",
+			requests: "",
+			limits:   "0",
+		},
+		{
+			name:     "zero both",
+			requests: "0",
+			limits:   "0",
+		},
+		{
+			name:     "negative requests",
+			requests: "-1",
+			limits:   "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resources := v1.ResourceRequirements{}
+
+			if tc.requests != "" {
+				resources.Requests = v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse(tc.requests),
+				}
+			}
+			if tc.limits != "" {
+				resources.Limits = v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse(tc.limits),
+				}
+			}
+
+			mutator := &maxProcsMutator{
+				cs: api.ClusterSpec{
+					Pod: &api.PodPolicy{
+						Resources: resources,
+					},
+				},
+			}
+
+			pod := &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name: etcdContainerName,
+							Env:  []v1.EnvVar{},
+						},
+					},
+				},
+			}
+
+			err := mutator.Mutate(pod)
+			if err != nil {
+				t.Fatalf("Mutate should not fail for zero CPU: %v", err)
+			}
+
+			// Should not add GOMAXPROCS for zero/negative CPU
+			container := pod.Spec.Containers[0]
+			for _, env := range container.Env {
+				if env.Name == "GOMAXPROCS" {
+					t.Errorf("GOMAXPROCS should not be added for zero/negative CPU in case %s", tc.name)
+				}
+			}
+		})
 	}
 }

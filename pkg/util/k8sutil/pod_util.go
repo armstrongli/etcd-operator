@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	etcdVolumeName = "etcd-data"
+	etcdVolumeName    = "etcd-data"
+	etcdContainerName = "etcd"
 )
 
 func etcdVolumeMounts() []v1.VolumeMount {
@@ -38,7 +39,7 @@ func etcdVolumeMounts() []v1.VolumeMount {
 func etcdContainer(cmd []string, repo, version string) v1.Container {
 	c := v1.Container{
 		Command: cmd,
-		Name:    "etcd",
+		Name:    etcdContainerName,
 		Image:   ImageName(repo, version),
 		Ports: []v1.ContainerPort{
 			{
