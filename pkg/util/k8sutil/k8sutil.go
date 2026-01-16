@@ -30,7 +30,7 @@ import (
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
 	"github.com/pborman/uuid"
-	appsv1beta1 "k8s.io/api/apps/v1beta1"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -586,18 +586,18 @@ func CreatePatch(o, n, datastruct interface{}) ([]byte, error) {
 	return strategicpatch.CreateTwoWayMergePatch(oldData, newData, datastruct)
 }
 
-func PatchDeployment(kubecli kubernetes.Interface, namespace, name string, updateFunc func(*appsv1beta1.Deployment)) error {
-	od, err := kubecli.AppsV1beta1().Deployments(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+func PatchDeployment(kubecli kubernetes.Interface, namespace, name string, updateFunc func(*appsv1.Deployment)) error {
+	od, err := kubecli.AppsV1().Deployments(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	nd := od.DeepCopy()
 	updateFunc(nd)
-	patchData, err := CreatePatch(od, nd, appsv1beta1.Deployment{})
+	patchData, err := CreatePatch(od, nd, appsv1.Deployment{})
 	if err != nil {
 		return err
 	}
-	_, err = kubecli.AppsV1beta1().Deployments(namespace).Patch(context.TODO(), name, types.StrategicMergePatchType, patchData, metav1.PatchOptions{})
+	_, err = kubecli.AppsV1().Deployments(namespace).Patch(context.TODO(), name, types.StrategicMergePatchType, patchData, metav1.PatchOptions{})
 	return err
 }
 
