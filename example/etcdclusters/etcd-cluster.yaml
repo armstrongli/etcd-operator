@@ -1,0 +1,11 @@
+apiVersion: etcd.database.coreos.com/v1beta2
+kind: EtcdCluster
+metadata:
+  name: etcd
+spec:
+  pod:
+    ClusterDomain: .cluster.local # optional.
+    busyboxImage: alpine:3.23
+  repository: quay.io/coreos/etcd
+  size: 5
+  version: 3.6.7

@@ -1,0 +1,26 @@
+apiVersion: etcd.database.coreos.com/v1beta2
+kind: EtcdCluster
+metadata:
+  name: etcd-with-pvc
+spec:
+  pod:
+    ClusterDomain: .cluster.local # optional.
+    busyboxImage: alpine:3.23
+    persistentVolumeClaimSpec:
+      accessModes:
+      - ReadWriteOnce # change the access mode on demand
+      resources:
+        requests:
+          storage: 20Gi # change the storage size by data going to be held
+      storageClassName: standard # change it to the storage class want to use in the hosting cluster
+      volumeMode: Filesystem # change it on demand
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: 300m
+        memory: 100Mi
+  repository: quay.io/coreos/etcd
+  size: 5
+  version: 3.6.7
