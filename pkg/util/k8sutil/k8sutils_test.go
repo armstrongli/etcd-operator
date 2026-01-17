@@ -821,3 +821,91 @@ func TestMaxProcsMutator_ZeroCPU(t *testing.T) {
 		})
 	}
 }
+
+func TestSoftMemLimitMutator_PrivateFormatFunction(t *testing.T) {
+	// Create a test instance to access the private method
+	mutator := &softMemLimitMutator{}
+
+	testCases := []struct {
+		bytes    int64
+		expected string
+	}{
+		{1073741824, "1GiB"},                // Exactly 1GiB
+		{2147483648, "2GiB"},                // Exactly 2GiB
+		{536870912, "512MiB"},               // Exactly 512MiB
+		{104857600, "100MiB"},               // Exactly 100MiB
+		{1073741824 - 1, "1024MiB"},         // Just under 1GiB -> 1024MiB
+		{1073741824 + 536870912, "1536MiB"}, // 1.5GiB -> 1536MiB
+		{1024 * 1024, "1MiB"},               // Exactly 1MiB
+		{1024*1024 - 1, "1MiB"},             // Just under 1MiB -> rounds to 1MiB
+		{1024*1024 + 512*1024, "2MiB"},      // 1.5MiB -> rounds to 2MiB
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("%d bytes", tc.bytes), func(t *testing.T) {
+			actual := mutator.formatGOMEMLIMIT(tc.bytes)
+			if actual != tc.expected {
+				t.Errorf("formatGOMEMLIMIT(%d) = %s, expected %s",
+					tc.bytes, actual, tc.expected)
+			}
+		})
+	}
+}
+
+// Alternative: Test through the public Mutate method
+func TestSoftMemLimitMutator_FormatThroughMutate(t *testing.T) {
+	testCases := []struct {
+		memory   string
+		expected string
+	}{
+		{"1Gi", "922MiB"},   // 90% of 1GiB = ~922MiB
+		{"2Gi", "1843MiB"},  // 90% of 2GiB = ~1843MiB
+		{"4Gi", "3686MiB"},  // 90% of 4GiB = ~3686MiB
+		{"100Mi", "90MiB"},  // 90% of 100MiB = 90MiB
+		{"512Mi", "461MiB"}, // 90% of 512MiB = ~461MiB
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.memory, func(t *testing.T) {
+			mutator := &softMemLimitMutator{
+				cs: api.ClusterSpec{
+					Pod: &api.PodPolicy{
+						Resources: v1.ResourceRequirements{
+							Limits: v1.ResourceList{
+								v1.ResourceMemory: resource.MustParse(tc.memory),
+							},
+						},
+					},
+				},
+			}
+
+			pod := &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name: etcdContainerName,
+							Env:  []v1.EnvVar{},
+						},
+					},
+				},
+			}
+
+			err := mutator.Mutate(pod)
+			if err != nil {
+				t.Fatalf("Mutate failed: %v", err)
+			}
+
+			container := pod.Spec.Containers[0]
+			for _, env := range container.Env {
+				if env.Name == "GOMEMLIMIT" {
+					if env.Value != tc.expected {
+						t.Errorf("For memory %s: expected GOMEMLIMIT=%s, got %s",
+							tc.memory, tc.expected, env.Value)
+					}
+					return
+				}
+			}
+			t.Errorf("GOMEMLIMIT not found for memory %s", tc.memory)
+		})
+	}
+}

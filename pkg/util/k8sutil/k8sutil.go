@@ -81,6 +81,9 @@ func buildPodMutators(cs api.ClusterSpec) PodMutator {
 	defaultEtcdPodMutators = append(defaultEtcdPodMutators, &maxProcsMutator{
 		cs: cs,
 	})
+	defaultEtcdPodMutators = append(defaultEtcdPodMutators, &softMemLimitMutator{
+		cs: cs,
+	})
 	return defaultEtcdPodMutators
 }
 
@@ -148,6 +151,101 @@ func (m *maxProcsMutator) Mutate(pod *v1.Pod) error {
 		}
 	}
 	return nil
+}
+
+var _ PodMutator = &softMemLimitMutator{}
+
+type softMemLimitMutator struct {
+	cs api.ClusterSpec
+}
+
+// Mutate implements [PodMutator].
+func (s *softMemLimitMutator) Mutate(pod *v1.Pod) error {
+	const envNameGOMEMLIMIT = "GOMEMLIMIT"
+
+	// If no Pod spec, nothing to do
+	if s.cs.Pod == nil {
+		return nil
+	}
+
+	var memQuantity resource.Quantity
+
+	// Check requests FIRST (matching maxProcsMutator pattern)
+	if s.cs.Pod.Resources.Requests != nil && s.cs.Pod.Resources.Requests.Memory().Value() > 0 {
+		memQuantity = s.cs.Pod.Resources.Requests.Memory().DeepCopy()
+	}
+
+	// Then check limits (which OVERRIDE requests if present)
+	if s.cs.Pod.Resources.Limits != nil && s.cs.Pod.Resources.Limits.Memory().Value() > 0 {
+		memQuantity = s.cs.Pod.Resources.Limits.Memory().DeepCopy()
+	}
+
+	// If no memory quantity found, nothing to do
+	if memQuantity.Value() <= 0 {
+		return nil
+	}
+
+	// Calculate GOMEMLIMIT value (90% of available memory)
+	// This leaves some memory for the container runtime and other processes
+	memBytes := memQuantity.Value()
+	gomemlimitBytes := int64(float64(memBytes) * 0.9) // 90% of total memory
+
+	// Ensure minimum of 1MiB
+	if gomemlimitBytes < 1024*1024 {
+		gomemlimitBytes = 1024 * 1024 // 1MiB
+	}
+
+	// Convert to Go's GOMEMLIMIT format
+	gomemlimitValue := s.formatGOMEMLIMIT(gomemlimitBytes)
+
+	// Apply to etcd container
+	for i, item := range pod.Spec.Containers {
+		if item.Name == etcdContainerName {
+			mutated := false
+
+			// Check if GOMEMLIMIT already exists
+			for j, envItem := range item.Env {
+				if envItem.Name == envNameGOMEMLIMIT {
+					// Update existing value
+					envItem.Value = gomemlimitValue
+					item.Env[j] = *envItem.DeepCopy()
+					mutated = true
+					break
+				}
+			}
+
+			// Add if not exists
+			if !mutated {
+				item.Env = append(item.Env, v1.EnvVar{
+					Name:  envNameGOMEMLIMIT,
+					Value: gomemlimitValue,
+				})
+			}
+
+			pod.Spec.Containers[i] = *item.DeepCopy()
+			break
+		}
+	}
+
+	return nil
+}
+
+// formatGOMEMLIMIT formats bytes into Go's GOMEMLIMIT format
+// Go 1.19+ GOMEMLIMIT accepts: "100MiB", "1GiB", "500MiB", etc.
+func (s *softMemLimitMutator) formatGOMEMLIMIT(bytes int64) string {
+	const (
+		miB = 1024 * 1024
+		giB = 1024 * 1024 * 1024
+	)
+
+	// If divisible by GiB, use GiB
+	if bytes%giB == 0 {
+		return strconv.FormatInt(bytes/giB, 10) + "GiB"
+	}
+
+	// Otherwise use MiB (round to nearest MiB)
+	mebibytes := int64(math.Round(float64(bytes) / float64(miB)))
+	return strconv.FormatInt(mebibytes, 10) + "MiB"
 }
 
 func GetEtcdVersion(pod *v1.Pod) string {
