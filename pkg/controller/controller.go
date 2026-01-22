@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 	"github.com/coreos/etcd-operator/pkg/cluster"
 	"github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-
 	"github.com/sirupsen/logrus"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	kwatch "k8s.io/apimachinery/pkg/watch"
@@ -127,12 +127,12 @@ func (c *Controller) makeClusterConfig() cluster.Config {
 	}
 }
 
-func (c *Controller) initCRD() error {
-	err := k8sutil.CreateCRD(c.KubeExtCli, api.EtcdClusterCRDName, api.EtcdClusterResourceKind, api.EtcdClusterResourcePlural, "etcd")
+func (c *Controller) initCRD(ctx context.Context) error {
+	err := k8sutil.CreateCRD(ctx, c.KubeExtCli, api.EtcdClusterCRDName, api.EtcdClusterResourceKind, api.EtcdClusterResourcePlural, "etcd")
 	if err != nil {
 		return fmt.Errorf("failed to create CRD: %v", err)
 	}
-	return k8sutil.WaitCRDReady(c.KubeExtCli, api.EtcdClusterCRDName)
+	return k8sutil.WaitCRDReady(ctx, c.KubeExtCli, api.EtcdClusterCRDName)
 }
 
 func getNamespacedName(c *api.EtcdCluster) string {

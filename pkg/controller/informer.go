@@ -20,11 +20,10 @@ import (
 	"time"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
+	"github.com/coreos/etcd-operator/pkg/generated/informers/externalversions"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/coreos/etcd-operator/pkg/util/probe"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
@@ -36,10 +35,10 @@ func init() {
 	pt = newPanicTimer(time.Minute, "unexpected long blocking (> 1 Minute) when handling cluster event")
 }
 
-func (c *Controller) Start() error {
+func (c *Controller) Start(ctx context.Context) error {
 	// TODO: get rid of this init code. CRD and storage class will be managed outside of operator.
 	for {
-		err := c.initResource()
+		err := c.initResource(ctx)
 		if err == nil {
 			break
 		}
@@ -49,38 +48,40 @@ func (c *Controller) Start() error {
 	}
 
 	probe.SetReady()
-	c.run()
-	panic("unreachable")
+	if err := c.run(ctx); err != nil {
+		c.logger.Errorf("error running etcd informer factory: %v", err)
+		return err
+	}
+	return nil
 }
 
-func (c *Controller) run() {
-	var ns string
-	if c.Config.ClusterWide {
-		ns = metav1.NamespaceAll
-	} else {
-		ns = c.Config.Namespace
+func (c *Controller) run(ctx context.Context) error {
+	facOptions := []externalversions.SharedInformerOption{}
+	if !c.Config.ClusterWide {
+		facOptions = append(facOptions, externalversions.WithNamespace(c.Config.Namespace))
 	}
 
-	source := cache.NewListWatchFromClient(
-		c.Config.EtcdCRCli.EtcdV1beta2().RESTClient(),
-		api.EtcdClusterResourcePlural,
-		ns,
-		fields.Everything())
-
-	_, informer := cache.NewIndexerInformer(source, &api.EtcdCluster{}, 0, cache.ResourceEventHandlerFuncs{
+	etcdClusterFactory := externalversions.NewSharedInformerFactoryWithOptions(
+		c.Config.EtcdCRCli,
+		0,
+		facOptions...,
+	)
+	_, err := etcdClusterFactory.Etcd().V1beta2().EtcdClusters().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onAddEtcdClus,
 		UpdateFunc: c.onUpdateEtcdClus,
 		DeleteFunc: c.onDeleteEtcdClus,
-	}, cache.Indexers{})
-
-	ctx := context.TODO()
-	// TODO: use workqueue to avoid blocking
-	informer.Run(ctx.Done())
+	})
+	if err != nil {
+		return err
+	}
+	etcdClusterFactory.Start(ctx.Done())
+	<-ctx.Done()
+	return nil
 }
 
-func (c *Controller) initResource() error {
+func (c *Controller) initResource(ctx context.Context) error {
 	if c.Config.CreateCRD {
-		err := c.initCRD()
+		err := c.initCRD(ctx)
 		if err != nil {
 			return fmt.Errorf("fail to init CRD: %v", err)
 		}

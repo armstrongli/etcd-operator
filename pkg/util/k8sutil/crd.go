@@ -51,7 +51,7 @@ func listClustersURI(ns string) string {
 	return fmt.Sprintf("/apis/%s/namespaces/%s/%s", api.SchemeGroupVersion.String(), ns, api.EtcdClusterResourcePlural)
 }
 
-func CreateCRD(clientset apiextensionsclient.Interface, crdName, rkind, rplural, shortName string) error {
+func CreateCRD(ctx context.Context, clientset apiextensionsclient.Interface, crdName, rkind, rplural, shortName string) error {
 	crd := &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: crdName,
@@ -86,16 +86,18 @@ func CreateCRD(clientset apiextensionsclient.Interface, crdName, rkind, rplural,
 	if len(shortName) != 0 {
 		crd.Spec.Names.ShortNames = []string{shortName}
 	}
-	_, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Create(context.TODO(), crd, metav1.CreateOptions{})
+	_, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Create(ctx, crd, metav1.CreateOptions{})
 	if err != nil && !IsKubernetesResourceAlreadyExistError(err) {
 		return err
 	}
 	return nil
 }
 
-func WaitCRDReady(clientset apiextensionsclient.Interface, crdName string) error {
+func WaitCRDReady(ctx context.Context, clientset apiextensionsclient.Interface, crdName string) error {
 	err := retryutil.Retry(5*time.Second, 20, func() (bool, error) {
-		crd, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		crd, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crdName, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}

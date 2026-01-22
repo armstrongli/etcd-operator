@@ -63,7 +63,7 @@ func New(createCRD bool, namespace, mySvcAddr string) *Restore {
 // Start starts the restore operator.
 func (r *Restore) Start(ctx context.Context) error {
 	if r.createCRD {
-		if err := r.initCRD(); err != nil {
+		if err := r.initCRD(ctx); err != nil {
 			return err
 		}
 	}
@@ -74,10 +74,10 @@ func (r *Restore) Start(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (r *Restore) initCRD() error {
-	err := k8sutil.CreateCRD(r.kubeExtCli, api.EtcdRestoreCRDName, api.EtcdRestoreResourceKind, api.EtcdRestoreResourcePlural, "")
+func (r *Restore) initCRD(ctx context.Context) error {
+	err := k8sutil.CreateCRD(ctx, r.kubeExtCli, api.EtcdRestoreCRDName, api.EtcdRestoreResourceKind, api.EtcdRestoreResourcePlural, "")
 	if err != nil {
 		return fmt.Errorf("failed to create CRD: %v", err)
 	}
-	return k8sutil.WaitCRDReady(r.kubeExtCli, api.EtcdRestoreCRDName)
+	return k8sutil.WaitCRDReady(ctx, r.kubeExtCli, api.EtcdRestoreCRDName)
 }

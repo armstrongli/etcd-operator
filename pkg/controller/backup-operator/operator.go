@@ -71,7 +71,7 @@ func New(createCRD bool) *Backup {
 // Start starts the Backup operator.
 func (b *Backup) Start(ctx context.Context) error {
 	if b.createCRD {
-		if err := b.initCRD(); err != nil {
+		if err := b.initCRD(ctx); err != nil {
 			return err
 		}
 	}
@@ -81,10 +81,10 @@ func (b *Backup) Start(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (b *Backup) initCRD() error {
-	err := k8sutil.CreateCRD(b.kubeExtCli, api.EtcdBackupCRDName, api.EtcdBackupResourceKind, api.EtcdBackupResourcePlural, "")
+func (b *Backup) initCRD(ctx context.Context) error {
+	err := k8sutil.CreateCRD(ctx, b.kubeExtCli, api.EtcdBackupCRDName, api.EtcdBackupResourceKind, api.EtcdBackupResourcePlural, "")
 	if err != nil {
 		return fmt.Errorf("failed to create CRD: %v", err)
 	}
-	return k8sutil.WaitCRDReady(b.kubeExtCli, api.EtcdBackupCRDName)
+	return k8sutil.WaitCRDReady(ctx, b.kubeExtCli, api.EtcdBackupCRDName)
 }

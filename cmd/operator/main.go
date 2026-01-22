@@ -148,8 +148,10 @@ func run(ctx context.Context) {
 	startChaos(context.Background(), cfg.KubeCli, cfg.Namespace, chaosLevel)
 
 	c := controller.New(cfg)
-	err := c.Start()
-	logrus.Fatalf("controller Start() failed: %v", err)
+	if err := c.Start(ctx); err != nil {
+		logrus.Fatalf("controller Start() failed: %v", err)
+	}
+	logrus.Info("operator finish execution")
 }
 
 func newControllerConfig() controller.Config {
