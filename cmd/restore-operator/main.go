@@ -38,8 +38,9 @@ import (
 )
 
 var (
-	namespace string
-	createCRD bool
+	namespace      string
+	createCRD      bool
+	kubeconfigFile string
 )
 
 const (
@@ -48,6 +49,7 @@ const (
 )
 
 func init() {
+	flag.StringVar(&kubeconfigFile, "kubeconfig", "", "the kubeconfig file to talk to kubernetes control plane")
 	flag.BoolVar(&createCRD, "create-crd", true, "The restore operator will not create the EtcdRestore CRD when this flag is set to false.")
 	flag.Parse()
 }
@@ -71,7 +73,7 @@ func main() {
 	logrus.Infof("etcd-restore-operator Version: %v", version.Version)
 	logrus.Infof("Git SHA: %s", version.GitSHA)
 
-	kubecli := k8sutil.MustNewKubeClient()
+	kubecli := k8sutil.MustNewKubeClient(kubeconfigFile)
 
 	err = createServiceForMyself(kubecli, name, namespace)
 	if err != nil {
@@ -102,7 +104,9 @@ func main() {
 		RenewDeadline: 10 * time.Second,
 		RetryPeriod:   2 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
+			OnStartedLeading: func(ctx context.Context) {
+				run(ctx, kubecli)
+			},
 			OnStoppedLeading: func() {
 				logrus.Fatalf("leader election lost")
 			},
@@ -117,10 +121,10 @@ func createRecorder(kubecli kubernetes.Interface, name, namespace string) record
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: name})
 }
 
-func run(ctx context.Context) {
+func run(ctx context.Context, kubecli kubernetes.Interface) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	c := controller.New(createCRD, namespace, fmt.Sprintf("%s:%d", serviceNameForMyself, servicePortForMyself))
+	c := controller.New(createCRD, namespace, fmt.Sprintf("%s:%d", serviceNameForMyself, servicePortForMyself), kubecli)
 	err := c.Start(ctx)
 	if err != nil {
 		logrus.Fatalf("etcd restore operator stopped with error: %v", err)

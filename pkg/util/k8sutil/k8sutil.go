@@ -29,6 +29,7 @@ import (
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
+
 	"github.com/pborman/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -43,6 +44,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp" // for gcp auth
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -622,8 +624,8 @@ func NewEtcdPod(m *etcdutil.Member, initialCluster []string, clusterName, state,
 	return pod, nil
 }
 
-func MustNewKubeClient() kubernetes.Interface {
-	cfg, err := InClusterConfig()
+func MustNewKubeClient(kubeconfigPath string) kubernetes.Interface {
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		panic(err)
 	}

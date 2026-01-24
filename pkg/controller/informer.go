@@ -23,7 +23,6 @@ import (
 	"github.com/coreos/etcd-operator/pkg/generated/informers/externalversions"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/coreos/etcd-operator/pkg/util/probe"
-
 	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )

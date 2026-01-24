@@ -48,12 +48,12 @@ type Restore struct {
 }
 
 // New creates a restore operator.
-func New(createCRD bool, namespace, mySvcAddr string) *Restore {
+func New(createCRD bool, namespace, mySvcAddr string, kubecli kubernetes.Interface) *Restore {
 	return &Restore{
 		logger:     logrus.WithField("pkg", "controller"),
 		namespace:  namespace,
 		mySvcAddr:  mySvcAddr,
-		kubecli:    k8sutil.MustNewKubeClient(),
+		kubecli:    kubecli,
 		etcdCRCli:  client.MustNewInCluster(),
 		kubeExtCli: k8sutil.MustNewKubeExtClient(),
 		createCRD:  createCRD,

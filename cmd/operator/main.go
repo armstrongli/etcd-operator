@@ -31,9 +31,9 @@ import (
 	"github.com/coreos/etcd-operator/pkg/util/probe"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
 	"github.com/coreos/etcd-operator/version"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
@@ -48,10 +48,11 @@ import (
 )
 
 var (
-	namespace  string
-	name       string
-	listenAddr string
-	gcInterval time.Duration
+	kubeconfigFile string
+	namespace      string
+	name           string
+	listenAddr     string
+	gcInterval     time.Duration
 
 	chaosLevel int
 
@@ -63,6 +64,7 @@ var (
 )
 
 func init() {
+	flag.StringVar(&kubeconfigFile, "kubeconfig", "", "the kubeconfig file to talk to kubernetes control plane")
 	flag.StringVar(&listenAddr, "listen-addr", "0.0.0.0:8080", "The address on which the HTTP server will listen to")
 	// chaos level will be removed once we have a formal tool to inject failures.
 	flag.IntVar(&chaosLevel, "chaos-level", -1, "DO NOT USE IN PRODUCTION - level of chaos injected into the etcd clusters created by the operator.")
@@ -101,7 +103,7 @@ func main() {
 		logrus.Fatalf("failed to get hostname: %v", err)
 	}
 
-	kubecli := k8sutil.MustNewKubeClient()
+	kubecli := k8sutil.MustNewKubeClient(kubeconfigFile)
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	http.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
@@ -130,7 +132,9 @@ func main() {
 		RenewDeadline: 10 * time.Second,
 		RetryPeriod:   2 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
+			OnStartedLeading: func(ctx context.Context) {
+				run(ctx, kubecli)
+			},
 			OnStoppedLeading: func() {
 				logrus.Fatalf("leader election lost")
 			},
@@ -140,10 +144,10 @@ func main() {
 	panic("unreachable")
 }
 
-func run(ctx context.Context) {
+func run(ctx context.Context, kubecli kubernetes.Interface) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cfg := newControllerConfig()
+	cfg := newControllerConfig(kubecli)
 
 	startChaos(context.Background(), cfg.KubeCli, cfg.Namespace, chaosLevel)
 
@@ -154,9 +158,7 @@ func run(ctx context.Context) {
 	logrus.Info("operator finish execution")
 }
 
-func newControllerConfig() controller.Config {
-	kubecli := k8sutil.MustNewKubeClient()
-
+func newControllerConfig(kubecli kubernetes.Interface) controller.Config {
 	serviceAccount, err := getMyPodServiceAccount(kubecli)
 	if err != nil {
 		logrus.Fatalf("fail to get my pod's service account: %v", err)

@@ -57,11 +57,11 @@ type BackupRunner struct {
 }
 
 // New creates a backup operator.
-func New(createCRD bool) *Backup {
+func New(createCRD bool, kubecli kubernetes.Interface) *Backup {
 	return &Backup{
 		logger:      logrus.WithField("pkg", "controller"),
 		namespace:   os.Getenv(constants.EnvOperatorPodNamespace),
-		kubecli:     k8sutil.MustNewKubeClient(),
+		kubecli:     kubecli,
 		backupCRCli: client.MustNewInCluster(),
 		kubeExtCli:  k8sutil.MustNewKubeExtClient(),
 		createCRD:   createCRD,
