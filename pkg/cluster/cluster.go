@@ -456,7 +456,7 @@ func (c *Cluster) updateCRStatus() error {
 
 	newCluster := c.cluster
 	newCluster.Status = c.status
-	newCluster, err := c.config.EtcdCRCli.EtcdV1beta2().EtcdClusters(c.cluster.Namespace).Update(context.TODO(), c.cluster, metav1.UpdateOptions{})
+	newCluster, err := c.config.EtcdCRCli.EtcdV1beta2().EtcdClusters(c.cluster.Namespace).UpdateStatus(context.TODO(), c.cluster, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update CR status: %v", err)
 	}
