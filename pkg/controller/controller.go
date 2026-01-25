@@ -95,6 +95,7 @@ func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
 		if nc == nil {
 			return false, fmt.Errorf("cluster name cannot be more than %v characters long, please delete the CR\n", k8sutil.MaxNameLength)
 		}
+		nc.Start(context.TODO())
 		c.clusters[getNamespacedName(clus)] = nc
 
 		clustersCreated.Inc()

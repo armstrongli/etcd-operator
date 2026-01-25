@@ -102,7 +102,11 @@ func New(config Config, cl *api.EtcdCluster) *Cluster {
 		eventsCli: config.KubeCli.CoreV1().Events(cl.Namespace),
 	}
 
-	go func() {
+	return c
+}
+
+func (c *Cluster) Start(ctx context.Context) {
+	go func(ctx context.Context) {
 		if err := c.setup(); err != nil {
 			c.logger.Errorf("cluster failed to setup: %v", err)
 			if c.status.Phase != api.ClusterPhaseFailed {
@@ -115,9 +119,7 @@ func New(config Config, cl *api.EtcdCluster) *Cluster {
 			return
 		}
 		c.run()
-	}()
-
-	return c
+	}(ctx)
 }
 
 func (c *Cluster) setup() error {
