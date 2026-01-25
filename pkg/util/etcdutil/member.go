@@ -30,6 +30,8 @@ type Member struct {
 	// We know the ID of a member when we get the member information from etcd,
 	// but not from Kubernetes pod list.
 	ID uint64
+	// IsLearner tells whether the member is learner
+	IsLearner bool
 
 	SecurePeer   bool
 	SecureClient bool
@@ -96,7 +98,9 @@ func (ms MemberSet) Diff(other MemberSet) MemberSet {
 // IsEqual tells whether two member sets are equal by checking
 // - they have the same set of members and member equality are judged by Name only.
 func (ms MemberSet) IsEqual(other MemberSet) bool {
-	if ms.Size() != other.Size() {
+	memberCount, learnerCount := ms.Size()
+	otherMemberCount, otherLearnerCount := other.Size()
+	if memberCount != otherMemberCount || learnerCount != otherLearnerCount {
 		return false
 	}
 	for n := range ms {
@@ -107,8 +111,15 @@ func (ms MemberSet) IsEqual(other MemberSet) bool {
 	return true
 }
 
-func (ms MemberSet) Size() int {
-	return len(ms)
+func (ms MemberSet) Size() (memberCount, learnerCount int) {
+	for _, item := range ms {
+		if item.IsLearner {
+			learnerCount++
+		} else {
+			memberCount++
+		}
+	}
+	return
 }
 
 func (ms MemberSet) String() string {
@@ -122,6 +133,9 @@ func (ms MemberSet) String() string {
 
 func (ms MemberSet) PickOne() *Member {
 	for _, m := range ms {
+		if m.IsLearner {
+			continue
+		}
 		return m
 	}
 	panic("empty")
@@ -149,6 +163,15 @@ func (ms MemberSet) ClientURLs() []string {
 		endpoints = append(endpoints, m.ClientURL())
 	}
 	return endpoints
+}
+
+func (ms MemberSet) Learners() (out []Member) {
+	for _, item := range ms {
+		if item.IsLearner {
+			out = append(out, *item)
+		}
+	}
+	return
 }
 
 var validPeerURL = regexp.MustCompile(`^\w+:\/\/[\w\.\-]+(:\d+)?$`)

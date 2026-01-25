@@ -38,7 +38,7 @@ func handleGCS(ctx context.Context, kubecli kubernetes.Interface, s *api.GCSBack
 	defer cli.GCS.Close()
 
 	var tlsConfig *tls.Config
-	if tlsConfig, err = generateTLSConfig(kubecli, clientTLSSecret, namespace); err != nil {
+	if tlsConfig, err = generateTLSConfig(ctx, kubecli, clientTLSSecret, namespace); err != nil {
 		return nil, err
 	}
 	bm := backup.NewBackupManagerFromWriter(kubecli, writer.NewGCSWriter(cli.GCS), tlsConfig, endpoints, namespace)

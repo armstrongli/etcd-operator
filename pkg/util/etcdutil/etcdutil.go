@@ -58,3 +58,21 @@ func RemoveMember(clientURLs []string, tc *tls.Config, id uint64) error {
 	cancel()
 	return err
 }
+
+func PromoteMember(clientURLs []string, tc *tls.Config, id uint64) error {
+	cfg := clientv3.Config{
+		Endpoints:   clientURLs,
+		DialTimeout: constants.DefaultDialTimeout,
+		TLS:         tc,
+	}
+	etcdcli, err := clientv3.New(cfg)
+	if err != nil {
+		return err
+	}
+	defer etcdcli.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultRequestTimeout)
+	_, err = etcdcli.Cluster.MemberPromote(ctx, id)
+	cancel()
+	return err
+}

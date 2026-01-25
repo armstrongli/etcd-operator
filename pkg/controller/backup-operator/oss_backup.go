@@ -38,7 +38,7 @@ func handleOSS(ctx context.Context, kubecli kubernetes.Interface, s *api.OSSBack
 		return nil, err
 	}
 
-	tlsConfig, err := generateTLSConfig(kubecli, clientTLSSecret, namespace)
+	tlsConfig, err := generateTLSConfig(ctx, kubecli, clientTLSSecret, namespace)
 	if err != nil {
 		return nil, err
 	}

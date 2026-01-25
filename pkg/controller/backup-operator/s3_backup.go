@@ -39,7 +39,7 @@ func handleS3(ctx context.Context, kubecli kubernetes.Interface, s *api.S3Backup
 	defer cli.Close()
 
 	var tlsConfig *tls.Config
-	if tlsConfig, err = generateTLSConfig(kubecli, clientTLSSecret, namespace); err != nil {
+	if tlsConfig, err = generateTLSConfig(ctx, kubecli, clientTLSSecret, namespace); err != nil {
 		return nil, err
 	}
 	bm := backup.NewBackupManagerFromWriter(kubecli, writer.NewS3Writer(cli.S3), tlsConfig, endpoints, namespace)

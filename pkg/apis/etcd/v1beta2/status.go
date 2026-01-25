@@ -26,15 +26,15 @@ type ClusterConditionType string
 
 const (
 	ClusterPhaseNone     ClusterPhase = ""
-	ClusterPhaseCreating              = "Creating"
-	ClusterPhaseRunning               = "Running"
-	ClusterPhaseFailed                = "Failed"
+	ClusterPhaseCreating ClusterPhase = "Creating"
+	ClusterPhaseRunning  ClusterPhase = "Running"
+	ClusterPhaseFailed   ClusterPhase = "Failed"
 
 	// See ./doc/user/conditions_and_events.md
 	ClusterConditionAvailable  ClusterConditionType = "Available"
-	ClusterConditionRecovering                      = "Recovering"
-	ClusterConditionScaling                         = "Scaling"
-	ClusterConditionUpgrading                       = "Upgrading"
+	ClusterConditionRecovering ClusterConditionType = "Recovering"
+	ClusterConditionScaling    ClusterConditionType = "Scaling"
+	ClusterConditionUpgrading  ClusterConditionType = "Upgrading"
 )
 
 type ClusterStatus struct {

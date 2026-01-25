@@ -37,7 +37,7 @@ func handleABS(ctx context.Context, kubecli kubernetes.Interface, s *api.ABSBack
 	}
 
 	var tlsConfig *tls.Config
-	if tlsConfig, err = generateTLSConfig(kubecli, clientTLSSecret, namespace); err != nil {
+	if tlsConfig, err = generateTLSConfig(ctx, kubecli, clientTLSSecret, namespace); err != nil {
 		return nil, err
 	}
 	bm := backup.NewBackupManagerFromWriter(kubecli, writer.NewABSWriter(cli.ABS), tlsConfig, endpoints, namespace)

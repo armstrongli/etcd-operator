@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 
@@ -25,10 +26,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func generateTLSConfig(kubecli kubernetes.Interface, clientTLSSecret, namespace string) (*tls.Config, error) {
+func generateTLSConfig(ctx context.Context, kubecli kubernetes.Interface, clientTLSSecret, namespace string) (*tls.Config, error) {
 	var tlsConfig *tls.Config
 	if len(clientTLSSecret) != 0 {
-		d, err := k8sutil.GetTLSDataFromSecret(kubecli, namespace, clientTLSSecret)
+		d, err := k8sutil.GetTLSDataFromSecret(ctx, kubecli, namespace, clientTLSSecret)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get TLS data from secret (%v): %v", clientTLSSecret, err)
 		}

@@ -121,6 +121,8 @@ func New(config Config, cl *api.EtcdCluster) *Cluster {
 }
 
 func (c *Cluster) setup() error {
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
 	var shouldCreateCluster bool
 	switch c.status.Phase {
 	case api.ClusterPhaseNone:
@@ -129,13 +131,12 @@ func (c *Cluster) setup() error {
 		return errCreatedCluster
 	case api.ClusterPhaseRunning:
 		shouldCreateCluster = false
-
 	default:
 		return fmt.Errorf("unexpected cluster phase: %s", c.status.Phase)
 	}
 
 	if c.isSecureClient() {
-		d, err := k8sutil.GetTLSDataFromSecret(c.config.KubeCli, c.cluster.Namespace, c.cluster.Spec.TLS.Static.OperatorSecret)
+		d, err := k8sutil.GetTLSDataFromSecret(ctx, c.config.KubeCli, c.cluster.Namespace, c.cluster.Spec.TLS.Static.OperatorSecret)
 		if err != nil {
 			return err
 		}

@@ -22,7 +22,7 @@ import (
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/util/constants"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,6 +39,14 @@ func MemberRemoveEvent(memberName string, cl *api.EtcdCluster) *v1.Event {
 	event.Type = v1.EventTypeNormal
 	event.Reason = "Member Removed"
 	event.Message = fmt.Sprintf("Existing member %s removed from the cluster", memberName)
+	return event
+}
+
+func MemberPromoteEvent(memberName string, cl *api.EtcdCluster) *v1.Event {
+	event := newClusterEvent(cl)
+	event.Type = v1.EventTypeNormal
+	event.Reason = "Member Promoted"
+	event.Message = fmt.Sprintf("Existing member %s promoted from learner", memberName)
 	return event
 }
 
