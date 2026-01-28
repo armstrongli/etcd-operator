@@ -26,6 +26,7 @@ import (
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
+	"github.com/coreos/etcd-operator/pkg/util/constants"
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
@@ -81,7 +82,7 @@ type Cluster struct {
 	// process runs in.
 	members etcdutil.MemberSet
 
-	tlsConfig *tls.Config
+	getTLSConfig func(ctx context.Context) (*tls.Config, error)
 
 	eventsCli corev1.EventInterface
 }
@@ -107,7 +108,7 @@ func New(config Config, cl *api.EtcdCluster) *Cluster {
 
 func (c *Cluster) Start(ctx context.Context) {
 	go func(ctx context.Context) {
-		if err := c.setup(); err != nil {
+		if err := c.setup(ctx); err != nil {
 			c.logger.Errorf("cluster failed to setup: %v", err)
 			if c.status.Phase != api.ClusterPhaseFailed {
 				c.status.SetReason(err.Error())
@@ -122,8 +123,8 @@ func (c *Cluster) Start(ctx context.Context) {
 	}(ctx)
 }
 
-func (c *Cluster) setup() error {
-	ctx, cancel := context.WithCancel(context.TODO())
+func (c *Cluster) setup(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var shouldCreateCluster bool
 	switch c.status.Phase {
@@ -138,13 +139,18 @@ func (c *Cluster) setup() error {
 	}
 
 	if c.isSecureClient() {
-		d, err := k8sutil.GetTLSDataFromSecret(ctx, c.config.KubeCli, c.cluster.Namespace, c.cluster.Spec.TLS.Static.OperatorSecret)
-		if err != nil {
-			return err
+		c.getTLSConfig = func(ctx context.Context) (*tls.Config, error) {
+			ctx, cancel := context.WithTimeout(ctx, constants.DefaultRequestTimeout)
+			defer cancel()
+			d, err := k8sutil.GetTLSDataFromSecret(ctx, c.config.KubeCli, c.cluster.Namespace, c.cluster.Spec.TLS.Static.OperatorSecret)
+			if err != nil {
+				return nil, err
+			}
+			return etcdutil.NewTLSConfig(d.CertData, d.KeyData, d.CAData)
 		}
-		c.tlsConfig, err = etcdutil.NewTLSConfig(d.CertData, d.KeyData, d.CAData)
-		if err != nil {
-			return err
+	} else {
+		c.getTLSConfig = func(ctx context.Context) (*tls.Config, error) {
+			return nil, nil
 		}
 	}
 

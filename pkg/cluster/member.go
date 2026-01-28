@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/coreos/etcd-operator/pkg/util/etcdutil"
@@ -25,7 +26,11 @@ import (
 )
 
 func (c *Cluster) updateMembers(known etcdutil.MemberSet) error {
-	resp, err := etcdutil.ListMembers(known.ClientURLs(), c.tlsConfig)
+	tlsCfg, err := c.getTLSConfig(context.TODO())
+	if err != nil {
+		return err
+	}
+	resp, err := etcdutil.ListMembers(known.ClientURLs(), tlsCfg)
 	if err != nil {
 		return err
 	}

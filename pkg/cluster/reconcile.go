@@ -132,10 +132,15 @@ func (c *Cluster) addOneMember() error {
 	memberCount, learnerCount := c.members.Size()
 	c.status.SetScalingUpCondition(memberCount+learnerCount, c.cluster.Spec.Size)
 
+	tlsCfg, err := c.getTLSConfig(context.TODO())
+	if err != nil {
+		return err
+	}
+
 	cfg := clientv3.Config{
 		Endpoints:   c.members.ClientURLs(),
 		DialTimeout: constants.DefaultDialTimeout,
-		TLS:         c.tlsConfig,
+		TLS:         tlsCfg,
 	}
 	etcdcli, err := clientv3.New(cfg)
 	if err != nil {
@@ -195,7 +200,11 @@ func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
 		}
 	}()
 
-	err = etcdutil.RemoveMember(c.members.ClientURLs(), c.tlsConfig, toRemove.ID)
+	tlsCfg, err := c.getTLSConfig(context.TODO())
+	if err != nil {
+		return err
+	}
+	err = etcdutil.RemoveMember(c.members.ClientURLs(), tlsCfg, toRemove.ID)
 	if err != nil {
 		switch err {
 		case rpctypes.ErrMemberNotFound:
@@ -251,7 +260,11 @@ func (c *Cluster) promoteMember(toPromote etcdutil.Member) (err error) {
 		}
 	}()
 
-	err = etcdutil.PromoteMember(c.members.ClientURLs(), c.tlsConfig, toPromote.ID)
+	tlsCfg, err := c.getTLSConfig(context.TODO())
+	if err != nil {
+		return err
+	}
+	err = etcdutil.PromoteMember(c.members.ClientURLs(), tlsCfg, toPromote.ID)
 	if err != nil {
 		switch err {
 		case rpctypes.ErrMemberNotFound:
