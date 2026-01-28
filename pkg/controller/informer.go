@@ -34,7 +34,7 @@ func init() {
 	pt = newPanicTimer(time.Minute, "unexpected long blocking (> 1 Minute) when handling cluster event")
 }
 
-func (c *Controller) Start(ctx context.Context) error {
+func (c *Controller) Run(ctx context.Context) error {
 	// TODO: get rid of this init code. CRD and storage class will be managed outside of operator.
 	for {
 		err := c.initResource(ctx)

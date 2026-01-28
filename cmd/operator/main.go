@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/coreos/etcd-operator/pkg/chaos"
@@ -107,7 +109,11 @@ func main() {
 
 	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	http.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
-	go http.ListenAndServe(listenAddr, nil)
+	go func() {
+		if err := http.ListenAndServe(listenAddr, nil); err != nil {
+			logrus.Fatal(err)
+		}
+	}()
 
 	rl, err := resourcelock.New(
 		resourcelock.LeasesResourceLock,
@@ -123,7 +129,7 @@ func main() {
 		logrus.Fatalf("error creating lock: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
@@ -149,10 +155,10 @@ func run(ctx context.Context, kubecli kubernetes.Interface) {
 	defer cancel()
 	cfg := newControllerConfig(kubecli)
 
-	startChaos(context.Background(), cfg.KubeCli, cfg.Namespace, chaosLevel)
+	startChaos(ctx, cfg.KubeCli, cfg.Namespace, chaosLevel)
 
 	c := controller.New(cfg)
-	if err := c.Start(ctx); err != nil {
+	if err := c.Run(ctx); err != nil {
 		logrus.Fatalf("controller Start() failed: %v", err)
 	}
 	logrus.Info("operator finish execution")
