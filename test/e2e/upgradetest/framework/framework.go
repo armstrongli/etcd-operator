@@ -22,7 +22,6 @@ import (
 	"github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
 	"github.com/coreos/etcd-operator/pkg/util/constants"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-	"github.com/coreos/etcd-operator/pkg/util/probe"
 	"github.com/coreos/etcd-operator/test/e2e/e2eutil"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -103,17 +102,6 @@ func (f *Framework) CreateOperator(name string) error {
 								Name:      constants.EnvOperatorPodName,
 								ValueFrom: &v1.EnvVarSource{FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
 							},
-						},
-						ReadinessProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								HTTPGet: &v1.HTTPGetAction{
-									Path: probe.HTTPReadyzEndpoint,
-									Port: intstr.IntOrString{Type: intstr.Int, IntVal: 8080},
-								},
-							},
-							InitialDelaySeconds: 3,
-							PeriodSeconds:       3,
-							FailureThreshold:    3,
 						},
 					}},
 				},

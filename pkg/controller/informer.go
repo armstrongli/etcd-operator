@@ -22,7 +22,6 @@ import (
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/generated/informers/externalversions"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-	"github.com/coreos/etcd-operator/pkg/util/probe"
 	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
@@ -41,12 +40,10 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err == nil {
 			break
 		}
-		c.logger.Errorf("initialization failed: %v", err)
-		c.logger.Infof("retry in %v...", initRetryWaitTime)
+		c.logger.Warnf("initialization failed: %v, retry in %v...", err, initRetryWaitTime)
 		time.Sleep(initRetryWaitTime)
 	}
 
-	probe.SetReady()
 	if err := c.run(ctx); err != nil {
 		c.logger.Errorf("error running etcd informer factory: %v", err)
 		return err

@@ -26,7 +26,6 @@ import (
 	"github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
 	"github.com/coreos/etcd-operator/pkg/util/constants"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-	"github.com/coreos/etcd-operator/pkg/util/probe"
 	"github.com/coreos/etcd-operator/pkg/util/retryutil"
 	"github.com/coreos/etcd-operator/test/e2e/e2eutil"
 
@@ -34,7 +33,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -137,17 +135,6 @@ func (f *Framework) SetupEtcdOperator() error {
 						Name:      constants.EnvOperatorPodName,
 						ValueFrom: &v1.EnvVarSource{FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
 					},
-				},
-				ReadinessProbe: &v1.Probe{
-					ProbeHandler: v1.ProbeHandler{
-						HTTPGet: &v1.HTTPGetAction{
-							Path: probe.HTTPReadyzEndpoint,
-							Port: intstr.IntOrString{Type: intstr.Int, IntVal: 8080},
-						},
-					},
-					InitialDelaySeconds: 3,
-					PeriodSeconds:       3,
-					FailureThreshold:    3,
 				},
 			}, {
 				Name:            etcdBackupOperatorName,

@@ -107,7 +107,6 @@ func main() {
 
 	kubecli := k8sutil.MustNewKubeClient(kubeconfigFile)
 
-	http.HandleFunc(probe.HTTPReadyzEndpoint, probe.ReadyzHandler)
 	http.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 	go func() {
 		if err := http.ListenAndServe(listenAddr, nil); err != nil {
