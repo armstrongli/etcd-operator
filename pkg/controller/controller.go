@@ -66,7 +66,7 @@ func New(cfg Config) *Controller {
 func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
 	clus := event.Object
 
-	if !c.managed(clus) {
+	if !c.isOperatorManaged(clus) {
 		return true, nil
 	}
 
@@ -118,6 +118,19 @@ func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
 		clustersTotal.Dec()
 	}
 	return false, nil
+}
+
+func (c *Controller) isOperatorManaged(clus *api.EtcdCluster) bool {
+	if v, ok := clus.Annotations[k8sutil.AnnotationScope]; ok {
+		if c.Config.ClusterWide {
+			return v == k8sutil.AnnotationClusterWide
+		}
+	} else {
+		if !c.Config.ClusterWide {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Controller) makeClusterConfig() cluster.Config {

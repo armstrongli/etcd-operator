@@ -21,7 +21,6 @@ import (
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/generated/informers/externalversions"
-	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
@@ -51,6 +50,16 @@ func (c *Controller) Run(ctx context.Context) error {
 	return nil
 }
 
+func (c *Controller) initResource(ctx context.Context) error {
+	if c.Config.CreateCRD {
+		err := c.initCRD(ctx)
+		if err != nil {
+			return fmt.Errorf("fail to init CRD: %v", err)
+		}
+	}
+	return nil
+}
+
 func (c *Controller) run(ctx context.Context) error {
 	facOptions := []externalversions.SharedInformerOption{}
 	if !c.Config.ClusterWide {
@@ -63,11 +72,12 @@ func (c *Controller) run(ctx context.Context) error {
 		facOptions...,
 	)
 	_, err := etcdClusterFactory.Etcd().V1beta2().EtcdClusters().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onAddEtcdClus,
-		UpdateFunc: c.onUpdateEtcdClus,
-		DeleteFunc: c.onDeleteEtcdClus,
+		AddFunc:    c.onAddEtcdCluster,
+		UpdateFunc: c.onUpdateEtcdCluster,
+		DeleteFunc: c.onDeleteEtcdCluster,
 	})
 	if err != nil {
+		c.logger.Errorf("error adding event handler etcdcluster object: %v", err)
 		return err
 	}
 	etcdClusterFactory.Start(ctx.Done())
@@ -75,34 +85,26 @@ func (c *Controller) run(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) initResource(ctx context.Context) error {
-	if c.Config.CreateCRD {
-		err := c.initCRD(ctx)
-		if err != nil {
-			return fmt.Errorf("fail to init CRD: %v", err)
-		}
-	}
-	return nil
+func (c *Controller) onAddEtcdCluster(obj interface{}) {
+	c.syncEtcdCluster(obj.(*api.EtcdCluster))
 }
 
-func (c *Controller) onAddEtcdClus(obj interface{}) {
-	c.syncEtcdClus(obj.(*api.EtcdCluster))
+func (c *Controller) onUpdateEtcdCluster(oldObj, newObj interface{}) {
+	c.syncEtcdCluster(newObj.(*api.EtcdCluster))
 }
 
-func (c *Controller) onUpdateEtcdClus(oldObj, newObj interface{}) {
-	c.syncEtcdClus(newObj.(*api.EtcdCluster))
-}
-
-func (c *Controller) onDeleteEtcdClus(obj interface{}) {
+func (c *Controller) onDeleteEtcdCluster(obj interface{}) {
 	clus, ok := obj.(*api.EtcdCluster)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
-			panic(fmt.Sprintf("unknown object from EtcdCluster delete event: %#v", obj))
+			c.logger.Warningf("unknown object from EtcdCluster delete event: %#v", obj)
+			return
 		}
 		clus, ok = tombstone.Obj.(*api.EtcdCluster)
 		if !ok {
-			panic(fmt.Sprintf("Tombstone contained object that is not an EtcdCluster: %#v", obj))
+			c.logger.Warningf("Tombstone contained object that is not an EtcdCluster: %#v", obj)
+			return
 		}
 	}
 	ev := &Event{
@@ -118,7 +120,7 @@ func (c *Controller) onDeleteEtcdClus(obj interface{}) {
 	pt.stop()
 }
 
-func (c *Controller) syncEtcdClus(clus *api.EtcdCluster) {
+func (c *Controller) syncEtcdCluster(clus *api.EtcdCluster) {
 	ev := &Event{
 		Type:   kwatch.Added,
 		Object: clus,
@@ -136,17 +138,4 @@ func (c *Controller) syncEtcdClus(clus *api.EtcdCluster) {
 		c.logger.Warningf("fail to handle event: %v", err)
 	}
 	pt.stop()
-}
-
-func (c *Controller) managed(clus *api.EtcdCluster) bool {
-	if v, ok := clus.Annotations[k8sutil.AnnotationScope]; ok {
-		if c.Config.ClusterWide {
-			return v == k8sutil.AnnotationClusterWide
-		}
-	} else {
-		if !c.Config.ClusterWide {
-			return true
-		}
-	}
-	return false
 }
