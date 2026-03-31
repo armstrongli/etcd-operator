@@ -36,13 +36,6 @@ type Event struct {
 	Object *api.EtcdCluster
 }
 
-type Controller struct {
-	logger *logrus.Entry
-	Config
-
-	clusters map[string]*cluster.Cluster
-}
-
 type Config struct {
 	Namespace      string
 	ClusterWide    bool
@@ -62,83 +55,39 @@ func New(cfg Config) *Controller {
 	}
 }
 
-// handleClusterEvent returns true if cluster is ignored (not managed) by this instance.
-func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
-	clus := event.Object
+type Controller struct {
+	logger *logrus.Entry
+	Config
 
-	if !c.isOperatorManaged(clus) {
-		return true, nil
-	}
-
-	if clus.Status.IsFailed() {
-		clustersFailed.Inc()
-		if event.Type == kwatch.Deleted {
-			delete(c.clusters, getNamespacedName(clus))
-			return false, nil
-		}
-		return false, fmt.Errorf("ignore failed cluster (%s). Please delete its CR", clus.Name)
-	}
-
-	clus.SetDefaults()
-
-	if err := clus.Spec.Validate(); err != nil {
-		return false, fmt.Errorf("invalid cluster spec. please fix the following problem with the cluster spec: %v", err)
-	}
-
-	switch event.Type {
-	case kwatch.Added:
-		if _, ok := c.clusters[getNamespacedName(clus)]; ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was created before but we received event (%s)", clus.Name, event.Type)
-		}
-
-		nc := cluster.New(c.makeClusterConfig(), clus)
-		if nc == nil {
-			return false, fmt.Errorf("cluster name cannot be more than %v characters long, please delete the CR\n", k8sutil.MaxNameLength)
-		}
-		nc.Start(context.TODO())
-		c.clusters[getNamespacedName(clus)] = nc
-
-		clustersCreated.Inc()
-		clustersTotal.Inc()
-
-	case kwatch.Modified:
-		if _, ok := c.clusters[getNamespacedName(clus)]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[getNamespacedName(clus)].Update(clus)
-		clustersModified.Inc()
-
-	case kwatch.Deleted:
-		if _, ok := c.clusters[getNamespacedName(clus)]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[getNamespacedName(clus)].Delete()
-		delete(c.clusters, getNamespacedName(clus))
-		clustersDeleted.Inc()
-		clustersTotal.Dec()
-	}
-	return false, nil
+	clusters map[string]*cluster.Cluster
 }
 
-func (c *Controller) isOperatorManaged(clus *api.EtcdCluster) bool {
-	if v, ok := clus.Annotations[k8sutil.AnnotationScope]; ok {
-		if c.Config.ClusterWide {
-			return v == k8sutil.AnnotationClusterWide
+func (c *Controller) Run(ctx context.Context) error {
+	// TODO: get rid of this init code. CRD and storage class will be managed outside of operator.
+	for {
+		err := c.initResource(ctx)
+		if err == nil {
+			break
 		}
-	} else {
-		if !c.Config.ClusterWide {
-			return true
-		}
+		c.logger.Warnf("initialization failed: %v, retry in %v...", err, initRetryWaitTime)
+		time.Sleep(initRetryWaitTime)
 	}
-	return false
+
+	if err := c.run(ctx); err != nil {
+		c.logger.Errorf("error running etcd informer factory: %v", err)
+		return err
+	}
+	return nil
 }
 
-func (c *Controller) makeClusterConfig() cluster.Config {
-	return cluster.Config{
-		ServiceAccount: c.Config.ServiceAccount,
-		KubeCli:        c.Config.KubeCli,
-		EtcdCRCli:      c.Config.EtcdCRCli,
+func (c *Controller) initResource(ctx context.Context) error {
+	if c.Config.CreateCRD {
+		err := c.initCRD(ctx)
+		if err != nil {
+			return fmt.Errorf("fail to init CRD: %v", err)
+		}
 	}
+	return nil
 }
 
 func (c *Controller) initCRD(ctx context.Context) error {
@@ -147,8 +96,4 @@ func (c *Controller) initCRD(ctx context.Context) error {
 		return fmt.Errorf("failed to create CRD: %v", err)
 	}
 	return k8sutil.WaitCRDReady(ctx, c.KubeExtCli, api.EtcdClusterCRDName)
-}
-
-func getNamespacedName(c *api.EtcdCluster) string {
-	return fmt.Sprintf("%s%c%s", c.Namespace, '/', c.Name)
 }
