@@ -17,23 +17,36 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	api "github.com/coreos/etcd-operator/pkg/apis/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/cluster"
 	"github.com/coreos/etcd-operator/pkg/generated/clientset/versioned"
+	etcdv1beta2 "github.com/coreos/etcd-operator/pkg/generated/listers/etcd/v1beta2"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
 	"github.com/sirupsen/logrus"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	kwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 )
 
 var initRetryWaitTime = 30 * time.Second
 
-type Event struct {
-	Type   kwatch.EventType
-	Object *api.EtcdCluster
+type EtcdClusterConsumer interface {
+	GetEtcdCluster(ns, name string) (*api.EtcdCluster, error)
+}
+
+var _ EtcdClusterConsumer = &etcdClusterConsumer{}
+
+type etcdClusterConsumer struct {
+	_etcdClusterLister etcdv1beta2.EtcdClusterLister
+}
+
+// GetEtcdCluster implements [EtcdClusterConsumer].
+func (e *etcdClusterConsumer) GetEtcdCluster(ns string, name string) (*api.EtcdCluster, error) {
+	return e._etcdClusterLister.EtcdClusters(ns).Get(name)
 }
 
 type Config struct {
@@ -44,14 +57,16 @@ type Config struct {
 	KubeExtCli     apiextensionsclient.Interface
 	EtcdCRCli      versioned.Interface
 	CreateCRD      bool
+	WorkerCount    int
 }
 
 func New(cfg Config) *Controller {
 	return &Controller{
 		logger: logrus.WithField("pkg", "controller"),
 
-		Config:   cfg,
-		clusters: make(map[string]*cluster.Cluster),
+		Config:       cfg,
+		clusters:     make(map[string]*cluster.Cluster),
+		clusterQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "etcd-cluster-queue"),
 	}
 }
 
@@ -59,7 +74,13 @@ type Controller struct {
 	logger *logrus.Entry
 	Config
 
-	clusters map[string]*cluster.Cluster
+	clusterQueue workqueue.RateLimitingInterface
+	// TODO move into a registry to hide the implementation details/complexity
+	clusters     map[string]*cluster.Cluster
+	clustersLock sync.Mutex
+
+	_etcdClusterInterface EtcdClusterConsumer
+	_etcdClusterSyncFunc  cache.InformerSynced
 }
 
 func (c *Controller) Run(ctx context.Context) error {

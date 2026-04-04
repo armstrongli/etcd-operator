@@ -23,16 +23,14 @@ import (
 	"github.com/coreos/etcd-operator/pkg/cluster"
 	"github.com/coreos/etcd-operator/pkg/generated/informers/externalversions"
 	"github.com/coreos/etcd-operator/pkg/util/k8sutil"
-	kwatch "k8s.io/apimachinery/pkg/watch"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/cache"
 )
 
-// TODO: get rid of this once we use workqueue
-var pt *panicTimer
-
-func init() {
-	pt = newPanicTimer(time.Minute, "unexpected long blocking (> 1 Minute) when handling cluster event")
-}
+const (
+	defaultEtcdClusterReconcileTimeout = 1 * time.Minute
+	defaultEtcdClusterCacheTimeout     = 15 * time.Minute // for large clusters, cache sync takes long time
+)
 
 func (c *Controller) run(ctx context.Context) error {
 	facOptions := []externalversions.SharedInformerOption{}
@@ -54,17 +52,45 @@ func (c *Controller) run(ctx context.Context) error {
 		c.logger.Errorf("error adding event handler etcdcluster object: %v", err)
 		return err
 	}
+	c._etcdClusterInterface = &etcdClusterConsumer{
+		_etcdClusterLister: etcdClusterFactory.Etcd().V1beta2().EtcdClusters().Lister(),
+	}
+	c._etcdClusterSyncFunc = etcdClusterFactory.Etcd().V1beta2().EtcdClusters().Informer().HasSynced
 	etcdClusterFactory.Start(ctx.Done())
+	if err := c.startWorkers(ctx); err != nil {
+		c.logger.Errorf("error starting workers: %v", err)
+		return err
+	}
 	<-ctx.Done()
 	return nil
 }
 
 func (c *Controller) onAddEtcdCluster(obj interface{}) {
-	c.syncEtcdCluster(obj.(*api.EtcdCluster))
+	etcdCluster, ok := obj.(*api.EtcdCluster)
+	if !ok {
+		c.logger.Warningf("got none EtcdCluster type: %+v", obj)
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(etcdCluster)
+	if err != nil {
+		c.logger.Warningf("failed to get cache key: %v", err)
+		return
+	}
+	c.clusterQueue.Add(key)
 }
 
 func (c *Controller) onUpdateEtcdCluster(oldObj, newObj interface{}) {
-	c.syncEtcdCluster(newObj.(*api.EtcdCluster))
+	// TODO add compare logic to ignore some update scenarios
+	etcdCluster, ok := newObj.(*api.EtcdCluster)
+	if !ok {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(etcdCluster)
+	if err != nil {
+		c.logger.Warningf("failed to get cache key: %v", err)
+		return
+	}
+	c.clusterQueue.Add(key)
 }
 
 func (c *Controller) onDeleteEtcdCluster(obj interface{}) {
@@ -81,75 +107,124 @@ func (c *Controller) onDeleteEtcdCluster(obj interface{}) {
 			return
 		}
 	}
-	ev := &Event{
-		Type:   kwatch.Deleted,
-		Object: clus,
-	}
-
-	pt.start()
-	_, err := c.handleClusterEvent(ev)
+	key, err := cache.MetaNamespaceKeyFunc(clus)
 	if err != nil {
-		c.logger.Warningf("fail to handle event: %v", err)
+		c.logger.Warningf("failed to get cache key: %v", err)
+		return
 	}
-	pt.stop()
+	c.clusterQueue.Add(key)
 }
 
-// handleClusterEvent returns true if cluster is ignored (not managed) by this instance.
-func (c *Controller) handleClusterEvent(event *Event) (bool, error) {
-	clus := event.Object
-
-	if !c.isOperatorManaged(clus) {
-		return true, nil
+func (c *Controller) startWorkers(ctx context.Context) error {
+	ctx4cache, cancel := context.WithTimeout(ctx, defaultEtcdClusterCacheTimeout)
+	defer cancel()
+	c.logger.Info("waiting for cache ready")
+	if !cache.WaitForCacheSync(ctx4cache.Done(), c._etcdClusterSyncFunc) {
+		c.logger.Errorf("timeout waiting for cache reacy. timeout after %s", defaultEtcdClusterCacheTimeout)
+		return fmt.Errorf("timeout waiting for cache ready")
 	}
+	workerCount := c.WorkerCount
+	if workerCount == 0 {
+		workerCount = 10
+		c.logger.Infof("worker count is 0, set up default worker count: %d", workerCount)
+	}
+	c.logger.Infof("starting %d workers", workerCount)
+	for i := 0; i < workerCount; i++ {
+		go c.runWorker(ctx)
+	}
+	return nil
+}
 
-	if clus.Status.IsFailed() {
+func (c *Controller) runWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		key, queueShutdown := c.clusterQueue.Get()
+		if queueShutdown {
+			return
+		}
+		if err := c.processEtcdClusterItem(ctx, key.(string)); err != nil {
+			c.clusterQueue.AddRateLimited(key)
+		} else {
+			c.clusterQueue.Forget(key)
+		}
+		c.clusterQueue.Done(key)
+	}
+}
+
+func (c *Controller) processEtcdClusterItem(ctx context.Context, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultEtcdClusterReconcileTimeout)
+	defer cancel()
+	// TODO set up context on reconcile process to guarantee reconcilation in control
+	ns, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		c.logger.Warningf("can't split key[%s], ignore it with error: %s", key, err)
+		return nil
+	}
+	_logger := c.logger.WithField("key", key)
+	_logger.Info("start processing etcd cluster")
+	etcdCluster, err := c._etcdClusterInterface.GetEtcdCluster(ns, name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// process etcd deletion logic. all etcd cluster instances(service/pod/volume) are managed through
+			// object owner reference. no specific logic is required. clean the trace from cache
+			c.clustersLock.Lock()
+			if _, ok := c.clusters[key]; !ok {
+				_logger.Warningf("unsafe state. cluster (%s) was never created but we received event", key)
+				return nil
+			}
+			c.clusters[key].Delete()
+			delete(c.clusters, key)
+			c.clustersLock.Unlock()
+			clustersDeleted.Inc()
+			clustersTotal.Dec()
+			return nil
+		}
+		_logger.Errorf("failed to get etcdcluster from cache: %v", err)
+		return err
+	}
+	// reconcile etcd cluster idempotently
+	if !c.isOperatorManaged(etcdCluster) {
+		_logger.Infof("not controller managed etcd cluster, ignore")
+		return nil
+	}
+	if etcdCluster.Status.IsFailed() {
 		clustersFailed.Inc()
-		if event.Type == kwatch.Deleted {
-			delete(c.clusters, getNamespacedName(clus))
-			return false, nil
-		}
-		return false, fmt.Errorf("ignore failed cluster (%s). Please delete its CR", clus.Name)
+		_logger.Warningf("etcd cluster is at Failed state. please reach etcd admin to fix it manually before further process")
+		return nil
 	}
 
-	clus.SetDefaults()
+	etcdCluster.SetDefaults()
 
-	if err := clus.Spec.Validate(); err != nil {
-		return false, fmt.Errorf("invalid cluster spec. please fix the following problem with the cluster spec: %v", err)
+	if err := etcdCluster.Spec.Validate(); err != nil {
+		_logger.Errorf("invalid cluster spec. please fix the following problem with the cluster spec: %v", err)
+		return nil
 	}
 
-	switch event.Type {
-	case kwatch.Added:
-		if _, ok := c.clusters[getNamespacedName(clus)]; ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was created before but we received event (%s)", clus.Name, event.Type)
-		}
-
-		nc := cluster.New(c.makeClusterConfig(), clus)
+	c.clustersLock.Lock()
+	defer c.clustersLock.Unlock()
+	if _, ok := c.clusters[key]; !ok {
+		// add new cluster trace and catch up etcd cluster
+		nc := cluster.New(c.makeClusterConfig(), etcdCluster)
 		if nc == nil {
-			return false, fmt.Errorf("cluster name cannot be more than %v characters long, please delete the CR\n", k8sutil.MaxNameLength)
+			// TODO record warning event on the error
+			return fmt.Errorf("cluster name cannot be more than %v characters long, please delete the CR\n", k8sutil.MaxNameLength)
 		}
+
 		nc.Start(context.TODO())
-		c.clusters[getNamespacedName(clus)] = nc
+		c.clusters[key] = nc
 
 		clustersCreated.Inc()
 		clustersTotal.Inc()
-
-	case kwatch.Modified:
-		if _, ok := c.clusters[getNamespacedName(clus)]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[getNamespacedName(clus)].Update(clus)
-		clustersModified.Inc()
-
-	case kwatch.Deleted:
-		if _, ok := c.clusters[getNamespacedName(clus)]; !ok {
-			return false, fmt.Errorf("unsafe state. cluster (%s) was never created but we received event (%s)", clus.Name, event.Type)
-		}
-		c.clusters[getNamespacedName(clus)].Delete()
-		delete(c.clusters, getNamespacedName(clus))
-		clustersDeleted.Inc()
-		clustersTotal.Dec()
+		return nil
 	}
-	return false, nil
+	// reconcile existing etcd cluster
+	c.clusters[key].Update(etcdCluster)
+	clustersModified.Inc()
+	return nil
 }
 
 func (c *Controller) isOperatorManaged(clus *api.EtcdCluster) bool {
@@ -171,28 +246,4 @@ func (c *Controller) makeClusterConfig() cluster.Config {
 		KubeCli:        c.Config.KubeCli,
 		EtcdCRCli:      c.Config.EtcdCRCli,
 	}
-}
-
-func (c *Controller) syncEtcdCluster(clus *api.EtcdCluster) {
-	ev := &Event{
-		Type:   kwatch.Added,
-		Object: clus,
-	}
-	// re-watch or restart could give ADD event.
-	// If for an ADD event the cluster spec is invalid then it is not added to the local cache
-	// so modifying that cluster will result in another ADD event
-	if _, ok := c.clusters[getNamespacedName(clus)]; ok {
-		ev.Type = kwatch.Modified
-	}
-
-	pt.start()
-	_, err := c.handleClusterEvent(ev)
-	if err != nil {
-		c.logger.Warningf("fail to handle event: %v", err)
-	}
-	pt.stop()
-}
-
-func getNamespacedName(c *api.EtcdCluster) string {
-	return fmt.Sprintf("%s%c%s", c.Namespace, '/', c.Name)
 }
