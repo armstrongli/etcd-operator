@@ -15,6 +15,7 @@
 package retryutil
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -32,13 +33,13 @@ func IsRetryFailure(err error) bool {
 	return ok
 }
 
-type ConditionFunc func() (bool, error)
+type ConditionFunc func(ctx context.Context) (bool, error)
 
 // Retry retries f every interval until after maxRetries.
 // The interval won't be affected by how long f takes.
 // For example, if interval is 3s, f takes 1s, another f will be called 2s later.
 // However, if f takes longer than interval, it will be delayed.
-func Retry(interval time.Duration, maxRetries int, f ConditionFunc) error {
+func Retry(ctx context.Context, interval time.Duration, maxRetries int, f ConditionFunc) error {
 	if maxRetries <= 0 {
 		return fmt.Errorf("maxRetries (%d) should be > 0", maxRetries)
 	}
@@ -46,7 +47,7 @@ func Retry(interval time.Duration, maxRetries int, f ConditionFunc) error {
 	defer tick.Stop()
 
 	for i := 0; ; i++ {
-		ok, err := f()
+		ok, err := f(ctx)
 		if err != nil {
 			return err
 		}

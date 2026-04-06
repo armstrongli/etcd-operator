@@ -151,7 +151,7 @@ func main() {
 func run(ctx context.Context, kubecli kubernetes.Interface) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cfg := newControllerConfig(kubecli)
+	cfg := newControllerConfig(ctx, kubecli)
 
 	startChaos(ctx, cfg.KubeCli, cfg.Namespace, chaosLevel)
 
@@ -162,8 +162,8 @@ func run(ctx context.Context, kubecli kubernetes.Interface) {
 	logrus.Info("operator finish execution")
 }
 
-func newControllerConfig(kubecli kubernetes.Interface) controller.Config {
-	serviceAccount, err := getMyPodServiceAccount(kubecli)
+func newControllerConfig(ctx context.Context, kubecli kubernetes.Interface) controller.Config {
+	serviceAccount, err := getMyPodServiceAccount(ctx, kubecli)
 	if err != nil {
 		logrus.Fatalf("fail to get my pod's service account: %v", err)
 	}
@@ -181,10 +181,10 @@ func newControllerConfig(kubecli kubernetes.Interface) controller.Config {
 	return cfg
 }
 
-func getMyPodServiceAccount(kubecli kubernetes.Interface) (string, error) {
+func getMyPodServiceAccount(ctx context.Context, kubecli kubernetes.Interface) (string, error) {
 	var sa string
-	err := retryutil.Retry(5*time.Second, 100, func() (bool, error) {
-		pod, err := kubecli.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	err := retryutil.Retry(ctx, 5*time.Second, 100, func(ctx context.Context) (bool, error) {
+		pod, err := kubecli.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			logrus.Errorf("fail to get operator pod (%s): %v", name, err)
 			return false, nil

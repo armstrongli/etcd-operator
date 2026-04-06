@@ -25,12 +25,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func (c *Cluster) updateMembers(known etcdutil.MemberSet) error {
-	tlsCfg, err := c.getTLSConfig(context.TODO())
+func (c *Cluster) updateMembers(ctx context.Context, known etcdutil.MemberSet) error {
+	tlsCfg, err := c.getTLSConfig(ctx)
 	if err != nil {
 		return err
 	}
-	resp, err := etcdutil.ListMembers(known.ClientURLs(), tlsCfg)
+	resp, err := etcdutil.ListMembers(ctx, known.ClientURLs(), tlsCfg)
 	if err != nil {
 		return err
 	}

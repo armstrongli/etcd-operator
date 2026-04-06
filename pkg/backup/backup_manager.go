@@ -161,7 +161,7 @@ func getClientWithMaxRev(ctx context.Context, endpoints []string, tc *tls.Config
 		for _, errStr := range errors {
 			errorStr += errStr + "\n"
 		}
-		err = fmt.Errorf(errorStr)
+		err = fmt.Errorf("%s", errorStr)
 	}
 
 	return maxClient, maxRev, err

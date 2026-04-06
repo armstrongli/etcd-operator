@@ -152,8 +152,8 @@ func testEtcdBackupOperatorForS3Backup(t *testing.T, clusterName, operatorClient
 	// local testing shows that it takes around 1 - 2 seconds from creating backup cr to verifying the backup from s3.
 	// 4 seconds timeout via retry is enough; duration longer than that may indicate internal issues and
 	// is worthy of investigation.
-	err = retryutil.Retry(time.Second, 4, func() (bool, error) {
-		reb, err := f.CRClient.EtcdV1beta2().EtcdBackups(f.Namespace).Get(context.TODO(), eb.Name, metav1.GetOptions{})
+	err = retryutil.Retry(context.TODO(), time.Second, 4, func(ctx context.Context) (bool, error) {
+		reb, err := f.CRClient.EtcdV1beta2().EtcdBackups(f.Namespace).Get(ctx, eb.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve backup CR: %v", err)
 		}
@@ -237,8 +237,8 @@ func testEtcdBackupOperatorForPeriodicS3Backup(t *testing.T, clusterName, operat
 	var periodicBackup, maxBackup bool
 	// Check if periodic backup is correctly performed
 	// Check if maxBackup is correctly performed
-	err = retryutil.Retry(time.Second, 20, func() (bool, error) {
-		allBackups, err = wr.List(context.Background(), backupS3Source.Path)
+	err = retryutil.Retry(context.TODO(), time.Second, 20, func(ctx context.Context) (bool, error) {
+		allBackups, err = wr.List(ctx, backupS3Source.Path)
 		sort.Strings(allBackups)
 		if err != nil {
 			return false, fmt.Errorf("failed to list backup files: %v", err)
@@ -281,8 +281,8 @@ func testEtcdRestoreOperatorForS3Source(t *testing.T, clusterName, s3Path string
 		}
 	}()
 
-	err = retryutil.Retry(10*time.Second, 1, func() (bool, error) {
-		er, err := f.CRClient.EtcdV1beta2().EtcdRestores(f.Namespace).Get(context.TODO(), er.Name, metav1.GetOptions{})
+	err = retryutil.Retry(context.TODO(), 10*time.Second, 1, func(ctx context.Context) (bool, error) {
+		er, err := f.CRClient.EtcdV1beta2().EtcdRestores(f.Namespace).Get(ctx, er.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve restore CR: %v", err)
 		}

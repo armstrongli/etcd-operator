@@ -35,7 +35,7 @@ var ErrLostQuorum = errors.New("lost quorum")
 // reconcile reconciles cluster current state to desired state specified by spec.
 // - it tries to reconcile the cluster to desired size.
 // - if the cluster needs for upgrade, it tries to upgrade old member one by one.
-func (c *Cluster) reconcile(pods []*v1.Pod) error {
+func (c *Cluster) reconcile(ctx context.Context, pods []*v1.Pod) error {
 	c.logger.Infoln("Start reconciling")
 	defer c.logger.Infoln("Finish reconciling")
 
@@ -50,7 +50,7 @@ func (c *Cluster) reconcile(pods []*v1.Pod) error {
 	memberCount, _ := c.members.Size()
 	// TODO add learner reconcile
 	if !running.IsEqual(c.members) || memberCount != sp.Size {
-		return c.reconcileMembers(running)
+		return c.reconcileMembers(ctx, running)
 	}
 	c.status.ClearCondition(api.ClusterConditionScaling)
 
@@ -58,7 +58,7 @@ func (c *Cluster) reconcile(pods []*v1.Pod) error {
 		c.status.UpgradeVersionTo(sp.Version)
 
 		m := pickOneOldMember(pods, sp.Version)
-		return c.upgradeOneMember(m.Name)
+		return c.upgradeOneMember(ctx, m.Name)
 	}
 	c.status.ClearCondition(api.ClusterConditionUpgrading)
 
@@ -77,7 +77,7 @@ func (c *Cluster) reconcile(pods []*v1.Pod) error {
 // 3. If L = members, the current state matches the membership state. END.
 // 4. If len(L) < len(members)/2 + 1, return quorum lost error.
 // 5. Add one missing member. END.
-func (c *Cluster) reconcileMembers(running etcdutil.MemberSet) error {
+func (c *Cluster) reconcileMembers(ctx context.Context, running etcdutil.MemberSet) error {
 	c.logger.Infof("running members: %s", running)
 	c.logger.Infof("cluster membership: %s", c.members)
 
@@ -86,7 +86,7 @@ func (c *Cluster) reconcileMembers(running etcdutil.MemberSet) error {
 	if memberCount+learnerCount > 0 {
 		c.logger.Infof("removing unexpected pods: %v", unknownMembers)
 		for _, m := range unknownMembers {
-			if err := c.removePod(m.Name); err != nil {
+			if err := c.removePod(ctx, m.Name); err != nil {
 				return err
 			}
 		}
@@ -96,7 +96,7 @@ func (c *Cluster) reconcileMembers(running etcdutil.MemberSet) error {
 	cMemberCount, cLearnerCount := c.members.Size()
 
 	if LmemberCount+LlearnerCount == cMemberCount+cLearnerCount {
-		return c.resize()
+		return c.resize(ctx)
 	}
 
 	if LmemberCount < cMemberCount/2+1 {
@@ -105,10 +105,10 @@ func (c *Cluster) reconcileMembers(running etcdutil.MemberSet) error {
 
 	c.logger.Infof("removing one dead member")
 	// remove dead members that doesn't have any running pods before doing resizing.
-	return c.removeDeadMember(c.members.Diff(L).PickOne())
+	return c.removeDeadMember(ctx, c.members.Diff(L).PickOne())
 }
 
-func (c *Cluster) resize() error {
+func (c *Cluster) resize(ctx context.Context) error {
 	cMemberCount, cLearnerCount := c.members.Size()
 	if cMemberCount == c.cluster.Spec.Size {
 		return nil
@@ -116,23 +116,23 @@ func (c *Cluster) resize() error {
 
 	if cLearnerCount > 0 {
 		toPromoteCount := c.cluster.Spec.Size - cMemberCount
-		return c.promoteMembers(toPromoteCount)
+		return c.promoteMembers(ctx, toPromoteCount)
 	}
 
 	if cMemberCount < c.cluster.Spec.Size {
-		return c.addOneMember()
+		return c.addOneMember(ctx)
 	}
 
-	return c.removeOneMember()
+	return c.removeOneMember(ctx)
 }
 
-func (c *Cluster) addOneMember() error {
-	ctx, cancel := context.WithCancel(context.TODO())
+func (c *Cluster) addOneMember(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	memberCount, learnerCount := c.members.Size()
 	c.status.SetScalingUpCondition(memberCount+learnerCount, c.cluster.Spec.Size)
 
-	tlsCfg, err := c.getTLSConfig(context.TODO())
+	tlsCfg, err := c.getTLSConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -150,9 +150,9 @@ func (c *Cluster) addOneMember() error {
 
 	newMember := c.newMember()
 	newMemberId, err := func(ctx context.Context) (memberId uint64, err error) {
-		ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultRequestTimeout)
+		ctx, cancel := context.WithTimeout(ctx, constants.DefaultRequestTimeout)
+		defer cancel()
 		resp, err := etcdcli.MemberAddAsLearner(ctx, []string{newMember.PeerURL()})
-		cancel()
 		if err != nil {
 			return 0, err
 		}
@@ -165,7 +165,7 @@ func (c *Cluster) addOneMember() error {
 	newMember.IsLearner = true
 	c.members.Add(newMember)
 
-	if err := c.createPod(c.members, newMember, "existing"); err != nil {
+	if err := c.createPod(ctx, c.members, newMember, "existing"); err != nil {
 		return fmt.Errorf("fail to create member's pod (%s): %v", newMember.Name, err)
 	}
 	c.logger.Infof("added member (%s)", newMember.Name)
@@ -176,35 +176,35 @@ func (c *Cluster) addOneMember() error {
 	return nil
 }
 
-func (c *Cluster) removeOneMember() error {
+func (c *Cluster) removeOneMember(ctx context.Context) error {
 	memberCount, _ := c.members.Size()
 	c.status.SetScalingDownCondition(memberCount, c.cluster.Spec.Size)
 
-	return c.removeMember(c.members.PickOne())
+	return c.removeMember(ctx, c.members.PickOne())
 }
 
-func (c *Cluster) removeDeadMember(toRemove *etcdutil.Member) error {
+func (c *Cluster) removeDeadMember(ctx context.Context, toRemove *etcdutil.Member) error {
 	c.logger.Infof("removing dead member %q", toRemove.Name)
-	_, err := c.eventsCli.Create(context.TODO(), k8sutil.ReplacingDeadMemberEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
+	_, err := c.eventsCli.Create(ctx, k8sutil.ReplacingDeadMemberEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Warningf("failed to create replacing dead member event: %v", err)
 	}
 
-	return c.removeMember(toRemove)
+	return c.removeMember(ctx, toRemove)
 }
 
-func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
+func (c *Cluster) removeMember(ctx context.Context, toRemove *etcdutil.Member) (err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("remove member (%s) failed: %v", toRemove.Name, err)
 		}
 	}()
 
-	tlsCfg, err := c.getTLSConfig(context.TODO())
+	tlsCfg, err := c.getTLSConfig(ctx)
 	if err != nil {
 		return err
 	}
-	err = etcdutil.RemoveMember(c.members.ClientURLs(), tlsCfg, toRemove.ID)
+	err = etcdutil.RemoveMember(ctx, c.members.ClientURLs(), tlsCfg, toRemove.ID)
 	if err != nil {
 		switch err {
 		case rpctypes.ErrMemberNotFound:
@@ -214,15 +214,15 @@ func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
 		}
 	}
 	c.members.Remove(toRemove.Name)
-	_, err = c.eventsCli.Create(context.TODO(), k8sutil.MemberRemoveEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
+	_, err = c.eventsCli.Create(ctx, k8sutil.MemberRemoveEvent(toRemove.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Errorf("failed to create remove member event: %v", err)
 	}
-	if err := c.removePod(toRemove.Name); err != nil {
+	if err := c.removePod(ctx, toRemove.Name); err != nil {
 		return err
 	}
 	if c.isPodPVEnabled() {
-		err = c.removePVC(k8sutil.PVCNameFromMember(toRemove.Name))
+		err = c.removePVC(ctx, k8sutil.PVCNameFromMember(toRemove.Name))
 		if err != nil {
 			return err
 		}
@@ -231,12 +231,12 @@ func (c *Cluster) removeMember(toRemove *etcdutil.Member) (err error) {
 	return nil
 }
 
-func (c *Cluster) promoteMembers(toPromoteCount int) error {
+func (c *Cluster) promoteMembers(ctx context.Context, toPromoteCount int) error {
 	// promote one etcd learner to member
 	c.logger.Infof("promoting %d members from learner", toPromoteCount)
 	promoteErrors := make([]error, 0, toPromoteCount)
 	for _, learner := range c.members.Learners() {
-		if err := c.promoteMember(learner); err != nil {
+		if err := c.promoteMember(ctx, learner); err != nil {
 			c.logger.Warningf("eror promoting learner[%s]", learner.Name)
 			promoteErrors = append(promoteErrors, err)
 			continue
@@ -253,18 +253,18 @@ func (c *Cluster) promoteMembers(toPromoteCount int) error {
 	return nil
 }
 
-func (c *Cluster) promoteMember(toPromote etcdutil.Member) (err error) {
+func (c *Cluster) promoteMember(ctx context.Context, toPromote etcdutil.Member) (err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("promote member (%s) failed: %v", toPromote.Name, err)
 		}
 	}()
 
-	tlsCfg, err := c.getTLSConfig(context.TODO())
+	tlsCfg, err := c.getTLSConfig(ctx)
 	if err != nil {
 		return err
 	}
-	err = etcdutil.PromoteMember(c.members.ClientURLs(), tlsCfg, toPromote.ID)
+	err = etcdutil.PromoteMember(ctx, c.members.ClientURLs(), tlsCfg, toPromote.ID)
 	if err != nil {
 		switch err {
 		case rpctypes.ErrMemberNotFound:
@@ -276,7 +276,7 @@ func (c *Cluster) promoteMember(toPromote etcdutil.Member) (err error) {
 	}
 	toPromote.IsLearner = false
 	c.members.Add(&toPromote)
-	_, err = c.eventsCli.Create(context.TODO(), k8sutil.MemberPromoteEvent(toPromote.Name, c.cluster), metav1.CreateOptions{})
+	_, err = c.eventsCli.Create(ctx, k8sutil.MemberPromoteEvent(toPromote.Name, c.cluster), metav1.CreateOptions{})
 	if err != nil {
 		c.logger.Warningf("failed to create promote member event: %v", err)
 	}
@@ -284,8 +284,8 @@ func (c *Cluster) promoteMember(toPromote etcdutil.Member) (err error) {
 	return nil
 }
 
-func (c *Cluster) removePVC(pvcName string) error {
-	err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Delete(context.TODO(), pvcName, metav1.DeleteOptions{})
+func (c *Cluster) removePVC(ctx context.Context, pvcName string) error {
+	err := c.config.KubeCli.CoreV1().PersistentVolumeClaims(c.cluster.Namespace).Delete(ctx, pvcName, metav1.DeleteOptions{})
 	if err != nil && !k8sutil.IsKubernetesResourceNotFoundError(err) {
 		return fmt.Errorf("remove pvc (%s) failed: %v", pvcName, err)
 	}

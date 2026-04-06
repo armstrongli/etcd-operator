@@ -94,7 +94,7 @@ func CreateCRD(ctx context.Context, clientset apiextensionsclient.Interface, crd
 }
 
 func WaitCRDReady(ctx context.Context, clientset apiextensionsclient.Interface, crdName string) error {
-	err := retryutil.Retry(5*time.Second, 20, func() (bool, error) {
+	err := retryutil.Retry(ctx, 5*time.Second, 20, func(ctx context.Context) (bool, error) {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		crd, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crdName, metav1.GetOptions{})

@@ -52,7 +52,7 @@ func (r *Restore) run(ctx context.Context) {
 
 	const numWorkers = 1
 	for i := 0; i < numWorkers; i++ {
-		go wait.Until(r.runWorker, time.Second, ctx.Done())
+		go wait.UntilWithContext(ctx, r.runWorker, time.Second)
 	}
 
 	<-ctx.Done()

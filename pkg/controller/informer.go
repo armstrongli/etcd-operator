@@ -112,7 +112,12 @@ func (c *Controller) onDeleteEtcdCluster(obj interface{}) {
 		c.logger.Warningf("failed to get cache key: %v", err)
 		return
 	}
+
+	c.logger.WithField("key", key).Info("cancel cluster context actively when getting the signal")
 	c.clusterQueue.Add(key)
+	c.clustersLock.Lock()
+	c.clusters[key].Stop()
+	c.clustersLock.Unlock()
 }
 
 func (c *Controller) startWorkers(ctx context.Context) error {
@@ -176,7 +181,7 @@ func (c *Controller) processEtcdClusterItem(ctx context.Context, key string) err
 				_logger.Warningf("unsafe state. cluster (%s) was never created but we received event", key)
 				return nil
 			}
-			c.clusters[key].Delete()
+			c.clusters[key].Stop()
 			delete(c.clusters, key)
 			c.clustersLock.Unlock()
 			clustersDeleted.Inc()

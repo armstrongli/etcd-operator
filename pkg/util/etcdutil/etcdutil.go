@@ -23,7 +23,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func ListMembers(clientURLs []string, tc *tls.Config) (*clientv3.MemberListResponse, error) {
+func ListMembers(ctx context.Context, clientURLs []string, tc *tls.Config) (*clientv3.MemberListResponse, error) {
 	cfg := clientv3.Config{
 		Endpoints:   clientURLs,
 		DialTimeout: constants.DefaultDialTimeout,
@@ -34,14 +34,14 @@ func ListMembers(clientURLs []string, tc *tls.Config) (*clientv3.MemberListRespo
 		return nil, fmt.Errorf("list members failed: creating etcd client failed: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultRequestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, constants.DefaultRequestTimeout)
+	defer cancel()
 	resp, err := etcdcli.MemberList(ctx)
-	cancel()
 	etcdcli.Close()
 	return resp, err
 }
 
-func RemoveMember(clientURLs []string, tc *tls.Config, id uint64) error {
+func RemoveMember(ctx context.Context, clientURLs []string, tc *tls.Config, id uint64) error {
 	cfg := clientv3.Config{
 		Endpoints:   clientURLs,
 		DialTimeout: constants.DefaultDialTimeout,
@@ -53,13 +53,13 @@ func RemoveMember(clientURLs []string, tc *tls.Config, id uint64) error {
 	}
 	defer etcdcli.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultRequestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, constants.DefaultRequestTimeout)
+	defer cancel()
 	_, err = etcdcli.Cluster.MemberRemove(ctx, id)
-	cancel()
 	return err
 }
 
-func PromoteMember(clientURLs []string, tc *tls.Config, id uint64) error {
+func PromoteMember(ctx context.Context, clientURLs []string, tc *tls.Config, id uint64) error {
 	cfg := clientv3.Config{
 		Endpoints:   clientURLs,
 		DialTimeout: constants.DefaultDialTimeout,
@@ -71,7 +71,7 @@ func PromoteMember(clientURLs []string, tc *tls.Config, id uint64) error {
 	}
 	defer etcdcli.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), constants.DefaultRequestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, constants.DefaultRequestTimeout)
 	_, err = etcdcli.Cluster.MemberPromote(ctx, id)
 	cancel()
 	return err

@@ -53,7 +53,7 @@ func UpdateCluster(crClient versioned.Interface, cl *api.EtcdCluster, maxRetries
 
 func AtomicUpdateClusterCR(crClient versioned.Interface, name, namespace string, maxRetries int, updateFunc k8sutil.EtcdClusterCRUpdateFunc) (*api.EtcdCluster, error) {
 	result := &api.EtcdCluster{}
-	err := retryutil.Retry(1*time.Second, maxRetries, func() (done bool, err error) {
+	err := retryutil.Retry(context.TODO(), 1*time.Second, maxRetries, func(ctx context.Context) (done bool, err error) {
 		etcdCluster, err := crClient.EtcdV1beta2().EtcdClusters(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
